@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>公務用圖表範本庫</title>
+<meta name="description" content="153 張現成的編輯風格圖表範本，可線上改成中文、換配色，下載 PNG／SVG／HTML。全程在你的瀏覽器裡完成，資料不會上傳。">
+<style>
+  /* 視覺跟「公務用工具箱」（gongwu-calc）對齊：暖紙底、印章紅、標題襯線體。
+     字型只寫字族名、不載任何 webfont——本站鐵律是零對外連線，
+     使用者機器上有 Noto 就用 Noto，沒有就退回系統字型。 */
+  :root{
+    --ink:#1d2a30; --ink-soft:#566870; --ink-faint:#8b969b;
+    --paper:#f3f1e9; --surface:#ffffff; --surface-2:#faf8f2;
+    --line:#dcd7cb; --line-soft:#e9e5db;
+    --seal:#9d2b25; --seal-deep:#7f2019; --seal-wash:#f6ebe8;
+    --ok:#2c6e49; --ok-wash:#eef3ec; --ok-line:#cdddc6;
+    --serif:"Noto Serif TC",serif;
+    --sans:"Noto Sans TC",system-ui,-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;
+    --r:10px; --pad:18px; --w:1080px;
+  }
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;}
+  body{margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--sans); font-size:16px; line-height:1.6;
+    font-variant-numeric:tabular-nums; -webkit-font-smoothing:antialiased;
+    overflow-wrap:break-word;}
+  a{color:inherit;}
+  .wrap{max-width:var(--w); margin:0 auto; padding:0 var(--pad) 64px;}
+
+  /* 頂欄：跟工具箱同一個招牌，並留一條路回去 */
+  .topbar{position:sticky; top:0; z-index:20; background:rgba(243,241,233,.92);
+    backdrop-filter:saturate(1.2) blur(8px); border-bottom:1px solid var(--line-soft);}
+  .topbar .row{max-width:var(--w); margin:0 auto; padding:12px var(--pad);
+    display:flex; align-items:center; gap:10px;}
+  .brand{display:flex; align-items:baseline; gap:9px; text-decoration:none; min-height:32px;}
+  .brand .mark{font-family:var(--serif); font-weight:700; font-size:18px; letter-spacing:.02em;}
+  .brand .en{font-size:11px; letter-spacing:.16em; color:var(--ink-faint); text-transform:uppercase;}
+  .seal-dot{width:9px; height:9px; border-radius:2px; background:var(--seal); flex:none; transform:translateY(-1px);}
+  .topbar .back{margin-left:auto; font-size:13px; color:var(--ink-soft); text-decoration:none;}
+  .topbar .back:hover{color:var(--seal);}
+
+  header.page{margin:26px 0;}
+  .eyebrow{font-size:12.5px; letter-spacing:.2em; color:var(--seal); font-weight:700; margin:0 0 10px;}
+  h1{font-family:var(--serif); font-weight:700; font-size:clamp(26px,6.4vw,33px);
+    line-height:1.2; margin:0 0 10px; letter-spacing:.01em;}
+  .lede{margin:0; color:var(--ink-soft); font-size:14.5px; max-width:60ch;}
+  /* 來源標註：整站只出現這一次，就放在標題底下 */
+  .source{margin:0 0 12px; font-size:12.5px; color:var(--ink-faint);}
+  .source a{color:var(--ink-soft);}
+  .privacy{display:inline-block; margin-top:14px; padding:7px 13px; border-radius:20px;
+    background:var(--ok-wash); border:1px solid var(--ok-line); font-size:13px; color:var(--ok); font-weight:500;}
+
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:var(--r);
+    padding:20px var(--pad); margin:16px 0;}
+  .card > h2{font-size:15px; font-weight:700; margin:0 0 4px; letter-spacing:.03em;}
+  .card > h2 + .hint{margin-bottom:16px;}
+  .hint{font-size:13px; color:var(--ink-soft); margin:6px 0 0; line-height:1.55;}
+  .hint code{background:var(--surface-2); border:1px solid var(--line-soft); border-radius:4px; padding:1px 5px; font-size:12px;}
+
+  /* 表單元件 */
+  label.fl{display:block; font-size:12px; color:var(--ink-soft); font-weight:500; margin-bottom:5px;}
+  select,input[type=text],input[type=search]{width:100%; font-family:var(--sans); font-size:16px; color:var(--ink);
+    background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px 12px; min-height:46px;}
+  select:focus-visible,input:focus-visible,textarea:focus-visible{outline:none; border-color:var(--seal);
+    box-shadow:0 0 0 3px var(--seal-wash);}
+  .grid{display:grid; grid-template-columns:1fr; gap:12px 16px;}
+  @media(min-width:720px){ .grid.c3{grid-template-columns:2fr 1fr 1fr;} .grid.c2{grid-template-columns:1fr 1fr;} }
+  .checkline{display:flex; gap:10px; align-items:center; font-size:14px; margin-top:12px;}
+  .checkline input{width:20px; height:20px; accent-color:var(--seal); flex:none;}
+
+  button{appearance:none; font-family:var(--sans); font-size:15px; font-weight:500;
+    background:#fff; border:1px solid var(--line); color:var(--ink);
+    padding:12px 18px; border-radius:8px; cursor:pointer; min-height:48px; transition:border-color .15s;}
+  button:hover:not(:disabled){border-color:var(--seal); color:var(--seal);}
+  button:focus-visible{outline:3px solid var(--seal-wash); outline-offset:2px;}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  button.primary{background:var(--seal); border-color:var(--seal); color:#fff; font-weight:700;
+    letter-spacing:.06em; min-height:52px;}
+  button.primary:hover:not(:disabled){background:var(--seal-deep); border-color:var(--seal-deep); color:#fff;}
+  .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:16px;}
+
+  /* 錯誤與提醒：預設 display:none，一定要加 .show 才看得見。
+     只塞文字不加 .show 會被 CSS 蓋掉，使用者一次都看不到。 */
+  .errbox{display:none; color:var(--seal); font-size:13.5px; margin:12px 2px 0; white-space:pre-line;}
+  .errbox.show{display:block;}
+  .okbox{display:none; color:var(--ok); font-size:13.5px; margin:12px 2px 0;}
+  .okbox.show{display:block;}
+
+  /* 範本列表 */
+  .countline{margin:14px 2px 6px; font-size:13px; color:var(--ink-soft);}
+  .tiles{display:grid; grid-template-columns:repeat(auto-fill,minmax(216px,1fr)); gap:14px; margin-top:6px;}
+  .tile{display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line);
+    border-radius:var(--r); overflow:hidden; text-decoration:none; color:inherit; transition:border-color .15s, transform .12s;}
+  .tile:hover{border-color:var(--seal); transform:translateY(-1px);}
+  .tile:focus-visible{outline:3px solid var(--seal-wash); outline-offset:2px; border-color:var(--seal);}
+  .tile .thumb{background:var(--surface-2); border-bottom:1px solid var(--line-soft);
+    height:150px; display:flex; align-items:center; justify-content:center; padding:8px; overflow:hidden;}
+  .tile .thumb svg{width:100%; height:100%; display:block;}
+  .tile .thumb .ph{font-size:12px; color:var(--ink-faint);}
+  .tile .meta{padding:10px 12px 12px;}
+  .tile .t1{font-family:var(--serif); font-weight:700; font-size:15px; line-height:1.35;}
+  .tile .t2{font-size:12px; color:var(--ink-soft); margin-top:3px;}
+  .tile .t3{font-size:11.5px; color:var(--ink-faint); margin-top:5px;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;}
+  .badge{display:inline-block; font-size:10.5px; letter-spacing:.08em; padding:2px 6px; border-radius:4px;
+    border:1px solid var(--line); color:var(--ink-soft); background:var(--surface-2); margin-right:5px;}
+  .badge.dark{background:#2d3142; color:#f3f1e9; border-color:#2d3142;}
+
+  /* 編輯畫面 */
+  .stage{background:var(--surface-2); border:1px solid var(--line-soft); border-radius:8px;
+    padding:12px; overflow:auto;}
+  .stage svg{width:100%; height:auto; display:block;}
+  .stage text{cursor:pointer;}
+  .trow{display:grid; grid-template-columns:1fr; gap:4px; padding:10px 0; border-top:1px solid var(--line-soft);}
+  .trow:first-child{border-top:0;}
+  @media(min-width:720px){ .trow{grid-template-columns:minmax(120px,0.8fr) 1.2fr; gap:12px; align-items:start;} }
+  .trow .orig{font-size:12.5px; color:var(--ink-faint); padding-top:10px; word-break:break-word;}
+  .trow.on{background:var(--seal-wash); border-radius:6px;}
+  .trow textarea{width:100%; font-family:var(--sans); font-size:15px; color:var(--ink); background:#fff;
+    border:1px solid var(--line); border-radius:8px; padding:8px 10px; min-height:42px; resize:vertical;
+    line-height:1.45;}
+  .swatches{display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;}
+  .swatch{display:flex; gap:6px; align-items:center; font-size:12px; color:var(--ink-soft);}
+  .swatch i{width:16px; height:16px; border-radius:4px; border:1px solid rgba(0,0,0,.15); display:block;}
+
+  footer.site{margin-top:36px; padding-top:18px; border-top:1px solid var(--line-soft);
+    font-size:12.5px; color:var(--ink-soft); line-height:1.7;}
+  footer.site a{color:var(--seal);}
+
+  .sr-only{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
+    clip:rect(0,0,0,0); white-space:nowrap; border:0;}
+  [hidden]{display:none !important;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="row">
+    <a class="brand" href="https://gongwu-calc.netlify.app">
+      <span class="seal-dot"></span>
+      <span class="mark">公務用工具箱</span>
+      <span class="en">gongwu</span>
+    </a>
+    <a class="back" href="https://gongwu-calc.netlify.app">← 回工具箱</a>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <!-- ══════════ 範本列表 ══════════ -->
+  <section id="galleryView">
+    <header class="page">
+      <p class="eyebrow">圖表範本庫</p>
+      <h1>公務用圖表範本庫</h1>
+      <p class="source">圖表範本取自
+        <a href="https://github.com/cathrynlavery/diagram-design" target="_blank" rel="noopener noreferrer">github.com/cathrynlavery/diagram-design</a>
+        ・MIT License・Cathryn Lavery</p>
+      <p class="lede">153 張排好版的圖表範本，挑一張、把英文改成中文、換成公文用得上的配色，
+        下載 PNG 貼進 Word 或簡報。流程圖、組織圖、甘特圖、時間軸、泳道圖都在裡面。</p>
+      <p class="privacy">全程在你的瀏覽器裡完成，沒有上傳、沒有後端，資料不離開這台裝置</p>
+    </header>
+
+    <div class="card">
+      <h2>能改什麼、不能改什麼</h2>
+      <p class="hint"><strong>能改的：</strong>圖上每一段文字、標題、四個主要顏色。
+        <strong>不能改的：</strong>方塊的位置與大小——那是範本畫死的。
+        中文比英文寬，字太長時本站會自動縮小字級塞進框裡，縮到看不清楚就代表該把字改短。</p>
+    </div>
+
+    <div class="card">
+      <h2>挑一張範本</h2>
+      <div class="grid c3">
+        <div>
+          <label class="fl" for="q">搜尋（中文名、用途、英文標題都可以）</label>
+          <input type="search" id="q" placeholder="例如：流程、甘特、組織">
+        </div>
+        <div>
+          <label class="fl" for="typeSel">類型</label>
+          <select id="typeSel"><option value="">全部類型</option></select>
+        </div>
+        <div>
+          <label class="fl" for="themeSel">深淺</label>
+          <select id="themeSel">
+            <option value="">不限</option>
+            <option value="light">淺色（印得出來）</option>
+            <option value="dark">深色（投影用）</option>
+          </select>
+        </div>
+      </div>
+      <label class="checkline"><input type="checkbox" id="commonChk" checked>
+        <span>只看公務常用的類型（流程圖、組織圖、甘特圖、時間軸、泳道圖…）</span></label>
+      <p class="countline" id="countLine" role="status" aria-live="polite"></p>
+      <p class="errbox" id="galleryErr" role="alert"></p>
+    </div>
+
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <!-- ══════════ 改字 ══════════ -->
+  <section id="editorView" hidden>
+    <p style="margin:18px 0 0"><a href="#/" id="backLink">← 回範本列表</a></p>
+    <header class="page">
+      <p class="eyebrow" id="edKind"></p>
+      <h1 id="edHeading"></h1>
+      <p class="lede" id="edUse"></p>
+    </header>
+
+    <div class="card">
+      <h2>預覽</h2>
+      <p class="hint">點圖上的文字，下面的欄位會跟著跳過去。這裡看到的就是下載到的。</p>
+      <div class="stage" id="stage" role="img" aria-label="圖表預覽"></div>
+      <p class="errbox" id="edErr" role="alert"></p>
+    </div>
+
+    <div class="card">
+      <h2>標題與配色</h2>
+      <div class="grid c2">
+        <div>
+          <label class="fl" for="edEyebrow">眉標（圖上方的小字，可留空）</label>
+          <input type="text" id="edEyebrow">
+        </div>
+        <div>
+          <label class="fl" for="edTitleIn">標題（可留空）</label>
+          <input type="text" id="edTitleIn">
+        </div>
+        <div>
+          <label class="fl" for="paletteSel">配色</label>
+          <select id="paletteSel"></select>
+        </div>
+        <div>
+          <label class="fl" for="scaleSel">PNG 解析度</label>
+          <select id="scaleSel">
+            <option value="1">1 倍（螢幕看）</option>
+            <option value="2" selected>2 倍（貼 Word 用，建議）</option>
+            <option value="3">3 倍（要放大或列印）</option>
+          </select>
+        </div>
+      </div>
+      <div class="swatches" id="swatches"></div>
+      <label class="checkline"><input type="checkbox" id="fitChk" checked>
+        <span>字太長時自動縮小字級（避免中文超出框線）</span></label>
+    </div>
+
+    <div class="card">
+      <h2>圖上的文字</h2>
+      <p class="hint" id="textCount"></p>
+      <div id="textList"></div>
+    </div>
+
+    <div class="card">
+      <h2>下載</h2>
+      <p class="hint">PNG 給 Word 與簡報用；SVG 是向量檔，放大不糊；HTML 可以離線開、用瀏覽器列印成 PDF。
+        三種都會在圖的下方帶一行來源標註。</p>
+      <div class="row">
+        <button type="button" class="primary" id="dlPng">下載 PNG</button>
+        <button type="button" id="dlSvg">下載 SVG</button>
+        <button type="button" id="dlHtml">下載 HTML</button>
+        <button type="button" id="resetBtn">全部復原</button>
+      </div>
+      <p class="okbox" id="edOk" role="status" aria-live="polite"></p>
+      <p class="errbox" id="dlErr" role="alert"></p>
+      <p class="hint" id="pngNote" hidden></p>
+    </div>
+  </section>
+
+  <footer class="site">
+    <p>本站原始碼：<a href="https://github.com/nienyiling/diagram-design" target="_blank" rel="noopener noreferrer">github.com/nienyiling/diagram-design</a>
+      ・純前端、零對外連線、無後端、無追蹤。<a href="https://gongwu-calc.netlify.app">回公務用工具箱</a></p>
+  </footer>
+</div>
+
+<noscript><p style="padding:18px">這個工具需要 JavaScript 才能運作，所有運算都在你自己的瀏覽器裡跑，沒有伺服器。</p></noscript>
+<script src="app/core.js"></script>
+<script src="app/editor.js"></script>
+<script src="app/app.js"></script>
+</body>
+</html>

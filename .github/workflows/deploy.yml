@@ -1,0 +1,157 @@
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches:
+      - main
+      - claude/cloudflare-diagram-design-tool-jslcim   # 開發分支，合併後可刪這行
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CF_PROJECT: diagram-design   # Cloudflare Pages 專案名，撞名時會自動加後綴
+
+jobs:
+  test:
+    name: 測試
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 這一關同時會重跑 scripts/build-data.mjs 並跟 commit 進來的 data/diagrams.json 比對，
+      # 有人改了轉換規則卻忘了 npm run build 就會在這裡紅。
+      - name: 純函式與資料一致性
+        run: npm run test:unit
+
+      # e2e 是唯一擋得住「資料檔壞掉、有幾張圖畫不出來」的關卡：
+      # 首頁看起來完全正常，要等使用者點進那一張才會發現。
+      - name: 安裝 Chromium
+        run: |
+          npm i -g playwright@1
+          npx playwright install --with-deps chromium
+
+      - name: 瀏覽器實測
+        run: npm run test:e2e
+
+  deploy:
+    name: 部署
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 檢查部署憑證
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          [ -n "$CLOUDFLARE_API_TOKEN" ]  || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少 repo secret：$missing"
+            echo "請到 Settings → Secrets and variables → Actions 新增；取得方式見 README「部署」段。" >&2
+            exit 1
+          fi
+          echo "憑證齊備。"
+
+      # 只把要上線的檔案放進 dist：vendor/upstream 是建置來源（2.3 MB 的上游 HTML），
+      # 站上跑的時候用不到，不要推上 CDN。
+      - name: 組出部署目錄
+        run: |
+          mkdir -p dist
+          cp index.html _headers dist/
+          cp -r app data dist/
+          echo "--- 部署包內容："
+          find dist -type f | sort
+          du -sh dist
+
+      # 少了 data/diagrams.json，首頁完全正常，只是一張範本都沒有。
+      # 這種壞法要等使用者真的打開才會發現，所以先擋一道。
+      - name: 檢查部署包齊不齊
+        run: |
+          missing=""
+          for f in \
+            dist/index.html \
+            dist/_headers \
+            dist/app/core.js \
+            dist/app/app.js \
+            dist/app/editor.js \
+            dist/data/diagrams.json
+          do
+            [ -f "$f" ] || missing="$missing $f"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::部署包缺少檔案：$missing"
+            exit 1
+          fi
+          count=$(node -e "console.log(require('./dist/data/diagrams.json').count)")
+          if [ "$count" -lt 100 ]; then
+            echo "::error::範本只剩 $count 張，資料檔應該是壞的"
+            exit 1
+          fi
+          echo "部署包齊備，範本 $count 張。"
+
+      # 首次執行時 Pages 專案還不存在，先建立；已存在則視為成功
+      #
+      # production branch 寫死 main，不要用 github 的 default_branch：
+      # 專案的 production branch 只在「建立當下」決定，之後只能到 Cloudflare 後台改。
+      # 若第一次跑的時候 repo 預設分支還是 claude/xxx，正式網址就會永遠掛在那個分支名下，
+      # 之後推 main 全部變成 preview 部署——這種錯很難發現，也很難修。
+      - name: 確保 Pages 專案存在
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set +e
+          out=$(npx --yes wrangler@3 pages project create "$CF_PROJECT" \
+                  --production-branch main 2>&1)
+          code=$?
+          echo "$out"
+          if [ $code -ne 0 ]; then
+            echo "$out" | grep -qiE 'already exists|already have a project|8000007' \
+              || { echo "::error::建立 Pages 專案失敗"; exit $code; }
+            echo "專案已存在，略過建立。"
+          fi
+
+      - name: wrangler pages deploy
+        id: cf
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy dist
+            --project-name=${{ env.CF_PROJECT }}
+            --branch=${{ github.ref_name }}
+            --commit-dirty=true
+
+      # 網址一律取自 wrangler 輸出，不要寫死：Pages 子網域全球唯一，
+      # 名稱被占用時 Cloudflare 會自動加後綴（dayoff → dayoff-ala.pages.dev 就是這樣來的）
+      - name: 摘要
+        env:
+          DEPLOY_URL: ${{ steps.cf.outputs.deployment-url }}
+          ALIAS_URL: ${{ steps.cf.outputs.pages-deployment-alias-url }}
+        run: |
+          {
+            echo "### Cloudflare Pages 部署完成"
+            echo ""
+            echo "- 分支：\`${{ github.ref_name }}\`"
+            echo "- 本次部署網址：${DEPLOY_URL:-（未取得）}"
+            echo "- 分支／正式網址：${ALIAS_URL:-（未取得）}"
+            echo ""
+            echo "驗收不要只看首頁開不開得起來：請點進一張範本，把字改成中文，"
+            echo "然後真的下載一次 PNG，確認圖上是中文、下方有來源標註。"
+          } >> "$GITHUB_STEP_SUMMARY"

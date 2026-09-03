@@ -1,0 +1,16 @@
+# Cloudflare Pages 與 Netlify 都吃這個檔案（放在發布目錄的根目錄）。
+
+# data/diagrams.json 是 2 MB 的範本資料，但檔名固定不變（改版時內容會換）。
+# 所以不能給 immutable——那會讓改過的範本永遠送不到已經來過的人手上。
+# 用 must-revalidate：瀏覽器每次問一句，沒變就回 304，實際只傳幾百個位元組。
+/data/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+/app/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+# 這個站不需要被任何人嵌進 iframe，也不該被猜 MIME
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
