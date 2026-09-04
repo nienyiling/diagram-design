@@ -106,6 +106,7 @@
   .badge{display:inline-block; font-size:10.5px; letter-spacing:.08em; padding:2px 6px; border-radius:4px;
     border:1px solid var(--line); color:var(--ink-soft); background:var(--surface-2); margin-right:5px;}
   .badge.dark{background:#2d3142; color:#f3f1e9; border-color:#2d3142;}
+  .badge.zh{background:var(--seal-wash); color:var(--seal); border-color:#ecd8d4; font-weight:700;}
 
   /* 編輯畫面 */
   .stage{background:var(--surface-2); border:1px solid var(--line-soft); border-radius:8px;
@@ -166,6 +167,11 @@
       <p class="hint"><strong>能改的：</strong>圖上每一段文字、標題、四個主要顏色。
         <strong>不能改的：</strong>方塊的位置與大小——那是範本畫死的。
         中文比英文寬，字太長時本站會自動縮小字級塞進框裡，縮到看不清楚就代表該把字改短。</p>
+      <p class="hint"><strong>關於中文：</strong>範本原本是英文的。掛「中文範本」標籤的 46 張（16 種圖），
+        已經整份改寫成公務情境（公文簽辦流程、機關組織與分工、案件狀態流轉、民眾申辦歷程、
+        跨科室案件流轉…），打開就是中文，改成你自己的案子即可。其餘的至少會把圖例、月份、
+        是／否這類固定用字換成中文，方塊裡的內容仍是範本自帶的示範資料，本來就要整段換掉。
+        沒有通用中文譯名的專有名詞（UML、Sankey、Wardley、draw.io 等）刻意留原文——硬翻反而看不懂。</p>
     </div>
 
     <div class="card">
@@ -190,6 +196,8 @@
       </div>
       <label class="checkline"><input type="checkbox" id="commonChk" checked>
         <span>只看公務常用的類型（流程圖、組織圖、甘特圖、時間軸、泳道圖…）</span></label>
+      <label class="checkline"><input type="checkbox" id="zhOnlyChk">
+        <span>只看已經寫好整份中文內容的（打開就是公文情境，改成你自己的案子就好）</span></label>
       <p class="countline" id="countLine" role="status" aria-live="polite"></p>
       <p class="errbox" id="galleryErr" role="alert"></p>
     </div>
@@ -238,6 +246,9 @@
         </div>
       </div>
       <div class="swatches" id="swatches"></div>
+      <label class="checkline" id="zhRow" hidden><input type="checkbox" id="zhChk" checked>
+        <span>先套上中文</span></label>
+      <p class="hint" id="zhNote"></p>
       <label class="checkline"><input type="checkbox" id="fitChk" checked>
         <span>字太長時自動縮小字級（避免中文超出框線）</span></label>
     </div>

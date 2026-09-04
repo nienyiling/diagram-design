@@ -115,7 +115,7 @@
 
   /* 公務最常用的一批，首頁預設先給這些 */
   var COMMON_TYPES = ['flowchart', 'org-chart', 'gantt', 'timeline', 'swimlane', 'process',
-    'layers', 'tree', 'quadrant', 'pyramid', 'venn', 'bar', 'line', 'journey', 'kanban'];
+    'state', 'layers', 'tree', 'quadrant', 'pyramid', 'venn', 'bar', 'line', 'journey', 'kanban'];
 
   var VARIANT_ZH = {
     '': '標準', 'dark': '深色', 'full': '完整版', 'terminal': '終端機風',
@@ -188,6 +188,211 @@
       svg: svg,
       css: css
     };
+  }
+
+  /* ── 圖上的文字：切成一段一段 ─────────────────────────────────────────
+     切法必須跟 editor.js 的 collectUnits() 一模一樣，因為中文層是「依序號對應」的：
+     這裡切成 30 段，中文就寫 30 筆，第 7 筆對第 7 段。切法一旦兩邊不一致，
+     中文就會整批錯位，而畫面上只是「字怪怪的」，不會報錯。
+     e2e 有一項逐張比對兩邊的段數，就是為了讓這種錯直接紅。 */
+
+  /** 拿掉不會畫在畫面上的區塊（定義、箭頭端點、裁切路徑）。 */
+  function stripNonVisual(svg) {
+    return String(svg)
+      .replace(/<defs\b[\s\S]*?<\/defs>/gi, '')
+      .replace(/<marker\b[\s\S]*?<\/marker>/gi, '')
+      .replace(/<clipPath\b[\s\S]*?<\/clipPath>/gi, '');
+  }
+
+  function normalizeSegment(s) {
+    return String(s).replace(/<[^>]*>/g, '')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'").replace(/&amp;/g, '&')
+      .replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * 依「有 tspan 就一個 tspan 一段，沒有就整個 <text> 一段」切出可編輯的文字段。
+   * 空白的段也要留著——序號要對得上，少一段後面全錯位。
+   */
+  function extractTextSegments(svg) {
+    var s = stripNonVisual(svg);
+    var out = [];
+    var re = /<text\b[^>]*>([\s\S]*?)<\/text>/gi;
+    var m;
+    while ((m = re.exec(s))) {
+      var inner = m[1];
+      /* 只收最內層的 tspan：外層 tspan 的內容包含內層，收了會重複 */
+      var leaves = [];
+      var tre = /<tspan\b[^>]*>((?:(?!<tspan)[\s\S])*?)<\/tspan>/gi;
+      var tm;
+      while ((tm = tre.exec(inner))) leaves.push(tm[1]);
+      if (leaves.length) {
+        leaves.forEach(function (t) { out.push({ text: normalizeSegment(t), multiline: false }); });
+      } else {
+        out.push({ text: normalizeSegment(inner), multiline: true });
+      }
+    }
+    return out;
+  }
+
+  /* ── 骨架字典：不管你要畫什麼都用得到的那些字 ───────────────────────
+     只收「換掉內容之後還會留在圖上」的字：圖例、月份、季別、是否、狀態欄位名。
+     內容字（Sprint velocity、Kubernetes、Athena 那些）不收——使用者本來就要整段換掉，
+     翻成中文一樣沒用，只是多一層要維護的東西。
+     比對時大小寫不計，但上游常用全大寫當標籤，所以中文也照樣簡短。 */
+  var GLOSSARY = {
+    /* 圖例與說明 */
+    'legend': '圖例',
+    'legend · shape carries type': '圖例 · 形狀代表類型',
+    'legend · relationships': '圖例 · 關係',
+    'type key': '類型對照',
+    'headline': '標題',
+    'trend': '趨勢',
+    'default': '一般',
+    'none': '無',
+    /* 流程圖 */
+    'yes': '是',
+    'no': '否',
+    'start / end (oval)': '起訖（橢圓）',
+    'step (rectangle)': '步驟（矩形）',
+    'decision (diamond)': '判斷（菱形）',
+    'happy path': '主要路徑',
+    'branch': '分支',
+    'step': '步驟',
+    'primary flow': '主要流向',
+    'primary path': '主要路徑',
+    'primary data path': '主要資料流向',
+    'data flow': '資料流向',
+    'sequential handoff': '依序交辦',
+    'standard handoff': '一般交辦',
+    'critical handoff': '關鍵交辦',
+    'focal handoff': '重點交辦',
+    'within-lane step': '同一泳道內的步驟',
+    'revision loop': '退回修正',
+    'focal outcome': '重點結果',
+    'left in · right out': '左進右出',
+    /* 甘特／期程 */
+    'task': '工作項目',
+    'phase': '階段',
+    'gate': '查核點',
+    'event': '事件',
+    'major milestone': '重要里程碑',
+    'milestone': '里程碑',
+    'q1': '第一季', 'q2': '第二季', 'q3': '第三季', 'q4': '第四季',
+    'january': '一月', 'february': '二月', 'march': '三月', 'april': '四月',
+    'may': '五月', 'june': '六月', 'july': '七月', 'august': '八月',
+    'september': '九月', 'october': '十月', 'november': '十一月', 'december': '十二月',
+    'jan': '1月', 'feb': '2月', 'mar': '3月', 'apr': '4月', 'jun': '6月',
+    'jul': '7月', 'aug': '8月', 'sep': '9月', 'oct': '10月', 'nov': '11月', 'dec': '12月',
+    'w1': '第1週', 'w2': '第2週', 'w3': '第3週', 'w4': '第4週',
+    'w5': '第5週', 'w6': '第6週', 'w7': '第7週', 'w8': '第8週',
+    /* 四象限與優先順序 */
+    'do first': '優先處理',
+    'quick wins': '容易見效',
+    'major projects': '重點專案',
+    'avoid': '不必投入',
+    '↑ high impact': '↑ 影響大',
+    '↓ low impact': '↓ 影響小',
+    '← low effort': '← 投入少',
+    'high effort →': '投入多 →',
+    'high': '高', 'low': '低', 'neutral': '普通',
+    'candidate project': '候選項目',
+    'start tomorrow': '明天就能開始',
+    'highest risk': '風險最高',
+    'risk': '風險',
+    /* 看板與狀態 */
+    'backlog': '待辦',
+    'in progress': '進行中',
+    'review': '審查中',
+    'done': '已完成',
+    'blocked': '卡住',
+    'waiting / external': '等待外部',
+    'over wip limit': '超過在製上限',
+    'draft': '草稿',
+    'unpublished': '未發布',
+    'in review': '審查中',
+    'awaiting approval': '待核定',
+    'published': '已發布',
+    'archived': '已封存',
+    'create': '建立', 'submit': '提送', 'approve': '核定',
+    'reject · revise': '退回修正', 'expire': '逾期', 'purge': '銷毀',
+    /* 旅程圖 */
+    'actions': '行動',
+    'touchpoints': '接觸點',
+    'stage 1': '階段一', 'stage 2': '階段二', 'stage 3': '階段三',
+    'stage 4': '階段四', 'stage 5': '階段五',
+    'sentiment curve': '感受曲線',
+    'trough stage': '低谷階段',
+    'pain marker': '痛點',
+    'pain-point': '痛點',
+    'bottleneck': '瓶頸',
+    'outcome': '結果',
+    'outcomes': '結果',
+    /* 資料與流程階段 */
+    'collection': '蒐集',
+    'processing': '處理',
+    'dissemination': '發布',
+    'ingest': '匯入', 'transform': '轉換', 'analyze': '分析', 'publish': '發布',
+    'raw': '原始', 'staging': '整理中', 'aggregated': '彙整', 'archive': '封存',
+    'source / consumer': '來源／使用端',
+    'external': '外部',
+    'external / third-party': '外部／第三方',
+    'internal package': '內部模組',
+    'cycle': '循環',
+    'lifecycle': '生命週期',
+    /* 關聯圖與類別圖 */
+    'entity': '實體',
+    'aggregate root': '彙總根',
+    'join table': '關聯表',
+    'schema group': '結構分組',
+    'primary key': '主鍵',
+    'foreign key': '外來鍵',
+    'cardinality': '對應關係',
+    'inheritance': '繼承',
+    'realization': '實作',
+    'composition · owns': '組合 · 擁有',
+    'aggregation · has': '聚合 · 包含',
+    'association': '關聯',
+    'dependency · uses': '相依 · 使用',
+    'dependency': '相依',
+    'component': '元件',
+    'leaf (no outgoing)': '末端（無對外相依）',
+    'cycle (back-edge)': '循環相依',
+    /* 前後比較 */
+    'before': '之前',
+    'after': '之後',
+    'passed': '通過', 'failed': '失敗', 'flaked': '不穩定',
+    '✓ pass': '✓ 通過',
+    'verify': '查驗',
+    'budget': '預算'
+  };
+
+  /** 骨架字典查表；查不到回 null（代表這一段留原文）。 */
+  function glossaryLookup(text, glossary) {
+    var g = glossary || GLOSSARY;
+    var k = String(text == null ? '' : text).trim().toLowerCase();
+    if (!k) return null;
+    return Object.prototype.hasOwnProperty.call(g, k) ? g[k] : null;
+  }
+
+  /**
+   * 把一張圖的每一段文字對到中文。
+   * sample（人工寫的公務情境內容）優先於 glossary（骨架字典）；兩邊都沒有就回 null，留原文。
+   * 回傳的陣列長度一定跟 segments 一樣長，序號才對得上。
+   */
+  function translateSegments(segments, sample, glossary) {
+    var sm = sample || [];
+    return (segments || []).map(function (seg, i) {
+      var text = seg && typeof seg === 'object' ? seg.text : seg;
+      if (sm[i] != null && String(sm[i]).length) return String(sm[i]);
+      return glossaryLookup(text, glossary);
+    });
+  }
+
+  /** 這張圖有沒有中文可以套。 */
+  function hasTranslation(zh) {
+    return Array.isArray(zh) && zh.some(function (v) { return v != null && v !== ''; });
   }
 
   /* ── 字型置換 ────────────────────────────────────────────────────── */
@@ -589,6 +794,7 @@
       if (q.theme === 'light' && d.dark) return false;
       if (q.theme === 'dark' && !d.dark) return false;
       if (q.common && COMMON_TYPES.indexOf(d.type) < 0) return false;
+      if (q.zhOnly && d.zhKind !== 'sample') return false;
       if (!kw) return true;
       var hay = [d.type, d.typeZh, d.title, d.heading, d.eyebrow, d.use, d.variantZh]
         .join(' ').toLowerCase();
@@ -602,6 +808,10 @@
     UPSTREAM_LIGHT: UPSTREAM_LIGHT, UPSTREAM_DARK: UPSTREAM_DARK,
     escapeXml: escapeXml, normalizeHex: normalizeHex, hexToRgb: hexToRgb,
     extractSvg: extractSvg, extractDocument: extractDocument,
+    GLOSSARY: GLOSSARY,
+    stripNonVisual: stripNonVisual, normalizeSegment: normalizeSegment,
+    extractTextSegments: extractTextSegments, glossaryLookup: glossaryLookup,
+    translateSegments: translateSegments, hasTranslation: hasTranslation,
     mapFontValue: mapFontValue, mapFonts: mapFonts, stripComments: stripComments,
     splitRules: splitRules, scopeCss: scopeCss, prefixKeyframes: prefixKeyframes,
     inlineCssIntoSvg: inlineCssIntoSvg,

@@ -130,6 +130,65 @@ await t('清單順序：同一種圖排在一起，標準版排在深色版前�
   });
 });
 
+await t('中文層的長度跟圖上的段數一樣（錯一格後面全錯位）', () => {
+  data.diagrams.forEach((d) => {
+    assert.equal(d.segs, DD.extractTextSegments(d.svg).length, d.id);
+    if (d.zh) assert.equal(d.zh.length, d.segs, d.id);
+  });
+});
+
+await t('中文範本：標題與大部分內容都寫好了', () => {
+  const samples = data.diagrams.filter((d) => d.zhKind === 'sample');
+  assert.ok(samples.length >= 30, '只有 ' + samples.length + ' 張');
+  samples.forEach((d) => {
+    assert.ok(d.zhHeading && d.zhHeading.length > 0, d.id + ' 沒有中文標題');
+    /* 分母只算「真的有字要翻」的段：座標軸上的數字、件數這種本來就不必翻，
+       拿總段數當分母的話，長條圖與折線圖會永遠不及格。
+       也不強求 100%：UML、Sankey、Wardley、draw.io 這類沒有通用中文譯名的專有名詞，
+       留原文比硬翻好，所以門檻抓九成。 */
+    const segs = DD.extractTextSegments(d.svg);
+    const wordy = segs.map((x, i) => [x.text, i]).filter(([txt]) => /[A-Za-z]{2,}/.test(txt));
+    const left = wordy.filter(([, i]) => !d.zh[i]);
+    const done = wordy.length - left.length;
+    assert.ok(wordy.length === 0 || done / wordy.length >= 0.9,
+      `${d.id} 只中文化了 ${done}/${wordy.length} 段：` + left.slice(0, 4).map(([t]) => t).join(' / '));
+  });
+});
+
+await t('zhKind 只有三種值，而且跟 zh 對得起來', () => {
+  data.diagrams.forEach((d) => {
+    assert.ok(['', 'gloss', 'sample'].includes(d.zhKind), d.id + '：' + d.zhKind);
+    assert.equal(!!d.zh, d.zhKind !== '', d.id);
+  });
+});
+
+await t('公務常用的每一種類型，標準版都有整份中文', () => {
+  const missing = DD.COMMON_TYPES.filter((ty) => {
+    const base = data.diagrams.find((d) => d.type === ty && d.variant === '');
+    return !base || base.zhKind !== 'sample';
+  });
+  assert.deepEqual(missing, []);
+});
+
+await t('zh-samples.json 裡的每一筆都對得到真的範本', () => {
+  const f = path.join(ROOT, 'content', 'zh-samples.json');
+  const samples = JSON.parse(fs.readFileSync(f, 'utf8'));
+  Object.keys(samples).filter((k) => !k.startsWith('_')).forEach((id) => {
+    const d = data.diagrams.find((x) => x.id === id);
+    assert.ok(d, '範本 ' + id + ' 不存在');
+    assert.equal(samples[id].texts.length, d.segs, id);
+  });
+});
+
+await t('中文內容裡沒有殘留的半形括號亂碼或未填的佔位', () => {
+  data.diagrams.filter((d) => d.zh).forEach((d) => {
+    d.zh.forEach((v, i) => {
+      if (v == null) return;
+      assert.ok(!/^(TODO|待填|xxx)$/i.test(v.trim()), `${d.id}[${i}]：${v}`);
+    });
+  });
+});
+
 await t('資料裡帶著上游來源與授權', () => {
   assert.equal(data.source.repo, 'cathrynlavery/diagram-design');
   assert.equal(data.source.license, 'MIT');

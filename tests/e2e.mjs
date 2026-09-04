@@ -80,7 +80,7 @@ await t('縮圖真的畫出 SVG（不是留在「載入中」）', async () => {
 
 await t('計數那行說得出總數', async () => {
   const line = await page.locator('#countLine').innerText();
-  assert.match(line, /找到 \d+ 張範本（全庫共 153 張）/);
+  assert.match(line, /找到 \d+ 張範本（其中 \d+ 張已寫好整份中文內容・全庫共 153 張）/);
 });
 
 await t('取消「只看常用」會看到全部 153 張', async () => {
@@ -310,6 +310,86 @@ await t('回列表的連結真的回得去', async () => {
   assert.equal(await page.locator('#editorView').isVisible(), false);
 });
 
+/* ── 中文層 ──────────────────────────────────────────────────────── */
+
+await t('中文範本：一打開就是中文，標題也是中文', async () => {
+  await page.goto(server.url + '#/example-swimlane', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  assert.equal(await page.locator('#zhChk').isChecked(), true, '有中文就該預設套上');
+  assert.equal(await page.locator('#zhRow').isVisible(), true);
+  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(svgText.includes('承辦人'), svgText.slice(0, 120));
+  assert.ok(svgText.includes('草擬簽稿'), '內容沒有換成公務情境');
+  assert.equal(await page.locator('#edTitleIn').inputValue(), '公文簽辦流程 · 誰負責哪一段');
+});
+
+await t('取消「先套上中文」會回到範本原文', async () => {
+  await page.locator('#zhChk').uncheck();
+  await page.waitForTimeout(300);
+  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(!svgText.includes('承辦人'));
+  assert.ok(svgText.includes('AUTHOR'), svgText.slice(0, 120));
+  assert.equal(await page.locator('#edTitleIn').inputValue(), '');
+  await page.locator('#zhChk').check();
+  await page.waitForTimeout(300);
+});
+
+await t('自己改過的字不會被中文層蓋掉', async () => {
+  await page.locator('#dd-t0').fill('本科承辦');
+  await page.waitForTimeout(250);
+  await page.locator('#zhChk').uncheck();
+  await page.waitForTimeout(250);
+  let svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(svgText.includes('本科承辦'), '關掉中文層時使用者改的字不見了');
+  await page.locator('#zhChk').check();
+  await page.waitForTimeout(250);
+  svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(svgText.includes('本科承辦'), '打開中文層時使用者改的字被蓋掉了');
+});
+
+await t('沒有整份中文的範本，至少圖例那類固定用字是中文', async () => {
+  await page.goto(server.url + '#/example-sankey', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  const note = await page.locator('#zhNote').innerText();
+  assert.ok(note.includes('固定用字'), note);
+  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(svgText.includes('圖例'), '連圖例都沒換成中文');
+});
+
+await t('沒有對應中文的專有名詞留原文，不硬翻', async () => {
+  await page.goto(server.url + '#/example-uml-class', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(svgText.includes('繼承'), '圖例那類該換的沒換');
+  assert.ok(svgText.includes('PaymentMethod'), '類別名稱這種專有名詞應該留原文');
+});
+
+await t('列表上看得出哪些是中文範本，也篩得出來', async () => {
+  await page.goto(server.url, { waitUntil: 'networkidle' });
+  await page.locator('#commonChk').uncheck();
+  await page.locator('#zhOnlyChk').check();
+  await page.waitForTimeout(200);
+  const n = await page.locator('.tile').count();
+  assert.ok(n >= 30, '只篩出 ' + n + ' 張');
+  assert.equal(await page.locator('.tile .badge.zh').count(), n, '每一張都該掛中文範本徽章');
+  assert.ok((await page.locator('#countLine').innerText()).includes('已寫好整份中文'));
+  await page.locator('#zhOnlyChk').uncheck();
+  await page.locator('#commonChk').check();
+  await page.waitForTimeout(200);
+});
+
+await t('下載的圖帶著中文內容', async () => {
+  await page.goto(server.url + '#/example-flowchart', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 15000 }),
+    page.locator('#dlSvg').click()
+  ]);
+  const text = fs.readFileSync(await download.path(), 'utf8');
+  assert.ok(text.includes('收到新型態案件'), '中文內容沒有寫進下載檔');
+  assert.ok(text.includes('案件要不要訂成標準作業程序'), '中文標題沒有寫進下載檔');
+});
+
 /* ── 每一張圖都要畫得出來 ──────────────────────────────────────────── */
 
 await t('153 張範本逐一開起來，都畫得出圖、都抓得到文字', async () => {
@@ -322,10 +402,21 @@ await t('153 張範本逐一開起來，都畫得出圖、都抓得到文字', a
     const info = await page.evaluate(() => {
       const svg = document.querySelector('#stage svg');
       const st = window.DDEditor._state();
-      return { has: !!svg, units: st ? st.orig.length : 0, rows: document.querySelectorAll('#textList .trow').length };
+      /* 純函式切出來的段數，一定要跟畫面上實際抓到的一樣：
+         中文層是依序號對應的，兩邊切法一旦不同，中文就整批錯位，
+         而畫面上只是「字怪怪的」，不會報錯——所以這一項是中文層的安全網 */
+      return {
+        has: !!svg,
+        units: st ? st.orig.length : 0,
+        rows: document.querySelectorAll('#textList .trow').length,
+        pure: window.DD.extractTextSegments(st.d.svg).length,
+        zh: st.d.zh ? st.d.zh.length : null
+      };
     });
     if (!info.has) bad.push(id + '：畫不出 svg');
     else if (info.units !== info.rows) bad.push(id + '：文字清單對不上');
+    else if (info.units !== info.pure) bad.push(`${id}：畫面切 ${info.units} 段、純函式切 ${info.pure} 段`);
+    else if (info.zh != null && info.zh !== info.units) bad.push(id + '：中文層長度對不上');
   }
   assert.deepEqual(bad, []);
 });

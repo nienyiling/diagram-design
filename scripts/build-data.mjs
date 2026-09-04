@@ -31,6 +31,20 @@ function cleanEyebrow(s) {
   return String(s || '').replace(/\s*[·|]\s*Diagram Design\s*$/i, '').trim();
 }
 
+/* 公務情境的中文範例：人工寫的，一張圖一筆，內容依序號對應圖上的每一段文字。
+   檔案不存在時整個站台照樣運作，只是少了「中文範例」那一層。 */
+function readSamples() {
+  const f = path.join(ROOT, 'content', 'zh-samples.json');
+  if (!fs.existsSync(f)) return {};
+  return JSON.parse(fs.readFileSync(f, 'utf8'));
+}
+const samples = readSamples();
+
+/** 深色版與完整版沿用標準版寫好的中文（版面一樣，文字也一樣）。 */
+function stripVariant(id) {
+  return String(id).replace(/-(dark|full)$/, '');
+}
+
 export function buildAll(dir = UPSTREAM_DIR) {
   const files = fs.readdirSync(dir)
     .filter((f) => f.endsWith('.html') && !SKIP.has(f))
@@ -69,6 +83,23 @@ export function buildAll(dir = UPSTREAM_DIR) {
     const dark = /(^|-)dark$/.test(variant);
     if (dark) svg = DD.fixDarkBackdrop(svg);
 
+    /* 中文層：骨架字典（全部 153 張都吃得到）＋ 人工寫的公務情境範例（少數幾張）。
+       兩者都是「依序號對應」，所以長度一定要跟 segments 一樣，序號才不會錯位。 */
+    const segments = DD.extractTextSegments(svg);
+    let sample = samples[id] || null;
+    if (sample && sample.texts.length !== segments.length) {
+      /* 直接指名這張圖卻寫錯段數，是筆誤，要讓建置紅掉 */
+      problems.push(`${file}：公務範例寫了 ${sample.texts.length} 段，圖上其實有 ${segments.length} 段，序號會錯位`);
+    }
+    if (!sample) {
+      /* 深色版與完整版沿用標準版的中文，但完整版常常多畫幾個方塊，
+         段數對不上就不套——寧可留原文，也不要整批錯位 */
+      const base = samples[stripVariant(id)];
+      if (base && base.texts.length === segments.length) sample = base;
+    }
+    const zh = DD.translateSegments(segments, sample && sample.texts);
+    const hasZh = DD.hasTranslation(zh);
+
     items.push({
       id,
       type,
@@ -85,6 +116,13 @@ export function buildAll(dir = UPSTREAM_DIR) {
       h: box ? box.h : 600,
       /* <foreignObject> 在 <img> 裡不會畫出來，所以這幾張不能轉 PNG，畫面上要說清楚 */
       png: !/<foreignObject/i.test(svg),
+      segs: segments.length,
+      /* zhKind：sample＝整張都是公務情境的中文；gloss＝只換掉圖例那類骨架字 */
+      zhKind: sample ? 'sample' : (hasZh ? 'gloss' : ''),
+      zhCount: zh.filter((v) => v != null && v !== '').length,
+      zhHeading: (sample && sample.heading) || '',
+      zhEyebrow: (sample && sample.eyebrow) || DD.typeLabel(type),
+      zh: hasZh ? zh : null,
       svg
     });
   }

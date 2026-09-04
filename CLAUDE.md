@@ -24,7 +24,9 @@
   UMD 包法，瀏覽器掛 `window.DD`，Node `require` 同一份。零相依。
 - `app/app.js`：載 `data/diagrams.json`、畫範本列表、hash 路由（`#/` 列表、`#/範本id` 改字）。
 - `app/editor.js`：改字畫面。掛 `window.DDEditor`。
-- `scripts/build-data.mjs`：`vendor/upstream/*.html` → `data/diagrams.json`。
+- `scripts/build-data.mjs`：`vendor/upstream/*.html` ＋ `content/zh-samples.json` → `data/diagrams.json`。
+- `content/zh-samples.json`：人工寫的公務情境中文範例，一張圖一筆，`texts` 依序號對應圖上每一段。
+  用 `node scripts/dump-segments.mjs <範本id>` 查序號。**只在建置時用，不部署。**
 - `vendor/upstream/`：上游範例圖的原樣副本（153 個 HTML）＋ LICENSE ＋ SOURCE.json。
   只在建置時用，**不部署**（部署包只有 `index.html`、`_headers`、`app/`、`data/`）。
 
@@ -64,6 +66,28 @@
   那是測試環境的語系問題，不是站上的問題；e2e 的檔名斷言改用英文標題，
   中文檔名的組法在 `core.unit` 的 `safeFilename` 測。
 
+## 中文層
+
+上游範本是英文的，內容是軟體專案的示範資料。**逐字直譯沒有用**——那些字使用者本來就要整段
+換掉。所以分兩層，都在建置時算好，站上不呼叫 LLM：
+
+1. **公務範例**（`content/zh-samples.json`）：人工把整張圖改寫成公務情境，不是翻譯。
+   46 張、16 種圖。深色版與完整版自動沿用標準版那一筆，**但段數不同時就不套**
+   （完整版常多畫幾個方塊，硬套會整批錯位）。
+2. **骨架字典**（`core.js` 的 `GLOSSARY`）：圖例、月份、季別、是／否、狀態欄位這類
+   「換掉內容之後還會留在圖上」的固定用字，141 張都吃得到。
+
+**沒有通用中文譯名的專有名詞一律留原文**（UML、Sankey、Wardley、draw.io、Mermaid、
+類別名稱、資料庫欄位名…）。`glossaryLookup` 查不到就回 `null`，原文保留——硬翻更難懂。
+`GLOSSARY` 也**不收內容字**（Sprint velocity、Kubernetes、Athena 那些），`core.unit` 有一項盯著。
+
+**中文層是「依序號對應」的**：`extractTextSegments()`（純函式）切出來的段數，必須跟
+`editor.js` 的 `collectUnits()`（DOM）切出來的完全一致。兩邊切法一旦不同，中文就整批錯位，
+而畫面上只是「字怪怪的」，不會報錯。e2e 逐張比對兩邊的段數，那是這一層唯一的安全網。
+
+畫面上的優先序：**使用者自己改的 → 中文層（開關打開時）→ 範本原文**，
+三者共用 `effectiveText(i)`，畫面、文字清單、下載才不會各說各話。
+
 ## 修改紀律
 
 1. 行為改了，就要同步改畫面上的 `hint` 說明文字與 `README.md`。
@@ -79,15 +103,17 @@
 
 | 指令 | 內容 |
 |---|---|
-| `npm test` | 全部：`core.unit`（97）＋`data`（18）＋`e2e`（40），約 90 秒 |
+| `npm test` | 全部：`core.unit`（114）＋`data`（24）＋`e2e`（47），約 100 秒 |
 | `npm run test:unit` | 純函式＋資料一致性，約 3 秒 |
 | `npm run test:e2e` | 只跑瀏覽器實測 |
 
 - 單元測試直接 `require` 站上那份 `app/core.js`，**不做副本**。
 - `tests/data.mjs` 會重跑一次 `scripts/build-data.mjs` 並跟 commit 進來的 JSON 逐字比對，
   這是唯一擋得住「建置產物走鐘」的關卡。
-- e2e 逐一開完 153 張範本，確認每一張都畫得出來、文字清單都對得上。
-  新增或移除範本時，張數寫死在 `tests/e2e.mjs`（多處）與 `index.html` 的說明文字裡。
+- e2e 逐一開完 153 張範本，確認每一張都畫得出來、文字清單都對得上，
+  並比對純函式與 DOM 兩邊切出來的段數（中文層的安全網，見上）。
+  新增或移除範本時，張數寫死在 `tests/e2e.mjs`（多處）與 `index.html` 的說明文字裡；
+  中文範本的張數也寫在 `index.html` 的說明卡與 `README.md`。
 - 錯誤訊息的測試要斷言**看得見**（`isVisible()`），不能只斷言 `textContent`。
 - 不能用 `file://` 開來測，`fetch()` 會被擋。
 

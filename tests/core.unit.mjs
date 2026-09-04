@@ -167,6 +167,91 @@ await t('stripComments 拿掉註解', () => {
   assert.equal(DD.stripComments('a<!--\nmulti\n-->b'), 'ab');
 });
 
+/* ── 圖上的文字：切段與中文層 ────────────────────────────────────── */
+const SEGSVG = '<svg viewBox="0 0 10 10">'
+  + '<defs><text>藏起來的</text></defs>'
+  + '<marker><text>箭頭裡的</text></marker>'
+  + '<text>單獨一段</text>'
+  + '<text><tspan>第一行</tspan><tspan>第二行</tspan></text>'
+  + '<text>  多餘   空白  </text>'
+  + '<text></text>'
+  + '</svg>';
+
+await t('extractTextSegments 不收 defs／marker 裡的文字（那些畫不出來）', () => {
+  const segs = DD.extractTextSegments(SEGSVG).map((x) => x.text);
+  assert.ok(!segs.includes('藏起來的'));
+  assert.ok(!segs.includes('箭頭裡的'));
+});
+await t('extractTextSegments 有 tspan 就一個 tspan 一段', () => {
+  const segs = DD.extractTextSegments(SEGSVG).map((x) => x.text);
+  assert.deepEqual(segs, ['單獨一段', '第一行', '第二行', '多餘 空白', '']);
+});
+await t('extractTextSegments 留著空白段（序號要對得上）', () => {
+  assert.equal(DD.extractTextSegments(SEGSVG).length, 5);
+});
+await t('extractTextSegments 標出哪些可以換行（整個 text 才可以，tspan 不行）', () => {
+  const segs = DD.extractTextSegments(SEGSVG);
+  assert.equal(segs[0].multiline, true);
+  assert.equal(segs[1].multiline, false);
+  assert.equal(segs[2].multiline, false);
+});
+await t('extractTextSegments 把實體字元還原', () => {
+  const segs = DD.extractTextSegments('<svg><text>a &amp; b &lt;c&gt;</text></svg>');
+  assert.equal(segs[0].text, 'a & b <c>');
+});
+await t('extractTextSegments 對沒有文字的圖回空陣列', () => {
+  assert.deepEqual(DD.extractTextSegments('<svg><rect/></svg>'), []);
+});
+await t('extractTextSegments 只收最內層的 tspan，不重複收外層', () => {
+  const segs = DD.extractTextSegments('<svg><text><tspan><tspan>裡</tspan></tspan></text></svg>');
+  assert.deepEqual(segs.map((x) => x.text), ['裡']);
+});
+
+await t('glossaryLookup 不分大小寫、前後空白不算', () => {
+  assert.equal(DD.glossaryLookup('LEGEND'), '圖例');
+  assert.equal(DD.glossaryLookup('  legend  '), '圖例');
+  assert.equal(DD.glossaryLookup('Yes'), '是');
+});
+await t('glossaryLookup 查不到就回 null（留原文，不亂猜）', () => {
+  assert.equal(DD.glossaryLookup('Sprint velocity'), null);
+  assert.equal(DD.glossaryLookup(''), null);
+  assert.equal(DD.glossaryLookup(null), null);
+});
+await t('骨架字典不收會被使用者整段換掉的內容字', () => {
+  ['sprint velocity', 'kubernetes', 'oauth', 'athena', 'shopify']
+    .forEach((k) => assert.equal(DD.glossaryLookup(k), null, k));
+});
+await t('骨架字典的值都是中文，不會有人漏填成英文', () => {
+  Object.keys(DD.GLOSSARY).forEach((k) => {
+    const v = DD.GLOSSARY[k];
+    assert.ok(v && v.length > 0, k);
+    assert.ok(/[\u4e00-\u9fff]/.test(v), `${k} 的中文是「${v}」`);
+  });
+});
+
+await t('translateSegments 長度一定跟原文一樣（序號要對得上）', () => {
+  const segs = DD.extractTextSegments(SEGSVG);
+  assert.equal(DD.translateSegments(segs, null).length, segs.length);
+  assert.equal(DD.translateSegments(segs, ['只寫一筆']).length, segs.length);
+});
+await t('translateSegments：人工範例優先於骨架字典', () => {
+  const segs = [{ text: 'LEGEND' }];
+  assert.deepEqual(DD.translateSegments(segs, ['自己寫的']), ['自己寫的']);
+  assert.deepEqual(DD.translateSegments(segs, null), ['圖例']);
+});
+await t('translateSegments：範例留空字串時退回骨架字典', () => {
+  assert.deepEqual(DD.translateSegments([{ text: 'YES' }], ['']), ['是']);
+});
+await t('translateSegments：兩邊都沒有就回 null（留原文）', () => {
+  assert.deepEqual(DD.translateSegments([{ text: 'Sprint velocity' }], null), [null]);
+});
+await t('hasTranslation 認得出「一筆中文都沒有」', () => {
+  assert.equal(DD.hasTranslation(null), false);
+  assert.equal(DD.hasTranslation([null, null]), false);
+  assert.equal(DD.hasTranslation([null, '', null]), false);
+  assert.equal(DD.hasTranslation([null, '圖例']), true);
+});
+
 /* ── 字型 ────────────────────────────────────────────────────────── */
 await t('mapFontValue 分得出 mono／serif／sans', () => {
   assert.equal(DD.mapFontValue("'Geist Mono', monospace"), DD.FONTS.mono);
@@ -455,6 +540,12 @@ await t('filterDiagrams 搜用途說明', () => {
 });
 await t('filterDiagrams 搜英文時不分大小寫', () => {
   assert.equal(DD.filterDiagrams(LIST, { q: 'BUDGET' }).length, 1);
+});
+await t('filterDiagrams 的中文篩選只留寫好整份中文的', () => {
+  const list = [{ type: 'flowchart', zhKind: 'sample' }, { type: 'flowchart', zhKind: 'gloss' },
+    { type: 'flowchart', zhKind: '' }];
+  assert.equal(DD.filterDiagrams(list, { zhOnly: true }).length, 1);
+  assert.equal(DD.filterDiagrams(list, {}).length, 3);
 });
 await t('filterDiagrams 的常用篩選只留常用類型', () => {
   const out = DD.filterDiagrams(LIST, { common: true });

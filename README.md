@@ -29,6 +29,28 @@
 | 不能改 | 方塊的位置與大小、線怎麼連——那是範本畫死的 |
 | 輸出 | PNG（貼 Word 與簡報）、SVG（向量，放大不糊）、HTML（離線開、瀏覽器列印成 PDF） |
 
+## 中文層
+
+上游範本是英文的，而且內容是軟體專案的示範資料（Sprint velocity、OAuth、Kubernetes）。
+逐字直譯對公務同仁沒有用——那些字他本來就要整段換掉。所以中文分兩層：
+
+| 層 | 做法 | 涵蓋 |
+|---|---|---|
+| **公務範例**（`content/zh-samples.json`） | 人工把整張圖改寫成公務情境，不是翻譯 | 46 張、16 種圖 |
+| **骨架字典**（`app/core.js` 的 `GLOSSARY`） | 圖例、月份、季別、是／否、狀態欄位這類「換掉內容之後還留在圖上」的固定用字 | 141 張都吃得到 |
+
+合計 4,829 段裡有 1,515 段（31%）預先中文化。畫面上有「先套上中文」的開關，
+有中文的預設打開；使用者自己改過的字永遠優先，切換開關不會蓋掉。
+
+**沒有通用中文譯名的專有名詞刻意留原文**（UML、Sankey、Wardley、draw.io、Mermaid、
+類別名稱、欄位名等）。硬翻成中文反而更難懂，`GLOSSARY` 查不到就回 `null`，原文保留。
+
+已寫好公務範例的 16 種：流程圖、泳道圖、流程階段圖（跨科室流轉）、組織圖、甘特圖、時間軸、
+狀態機圖、分層堆疊圖、樹狀圖、四象限、金字塔、文氏圖、長條圖、折線圖、使用者旅程圖、看板。
+
+要再加一張：`node scripts/dump-segments.mjs <範本id>` 印出每一段與序號，
+照序號寫進 `content/zh-samples.json`，再 `npm run build`。段數對不上建置會直接紅。
+
 中文比英文寬，同樣一句話常常寬一倍。字太長時本站會自動縮小字級塞進框裡，
 縮到看不清楚就代表該把字改短——這是刻意的：把字撐爆框線比縮小更糟。
 
@@ -42,8 +64,10 @@ index.html              介面與樣式（視覺與 gongwu-calc 對齊）
 app/core.js             唯一的純函式層，不碰 DOM，Node 直接 require 得動（UMD，瀏覽器掛 window.DD）
 app/app.js              載資料、畫範本列表、hash 路由
 app/editor.js           改字畫面的流程層：渲染、換色、自動縮字、下載
-data/diagrams.json      建置產物（2 MB），153 張自足 SVG＋中文分類。commit 進 repo，部署時直接送上去
-scripts/build-data.mjs  vendor/upstream/*.html → data/diagrams.json
+data/diagrams.json      建置產物（2 MB），153 張自足 SVG＋中文分類＋中文層。commit 進 repo，部署時直接送上去
+content/zh-samples.json 人工寫的公務情境中文範例（建置來源，不部署）
+scripts/build-data.mjs  vendor/upstream/*.html ＋ content/zh-samples.json → data/diagrams.json
+scripts/dump-segments.mjs  印出一張圖的每一段文字與序號，寫中文範例時用
 vendor/upstream/         上游範例圖的原樣副本＋LICENSE＋SOURCE.json（只在建置時用，不部署）
 ```
 
@@ -54,7 +78,7 @@ vendor/upstream/         上游範例圖的原樣副本＋LICENSE＋SOURCE.json�
 
 | 指令 | 內容 |
 |---|---|
-| `npm test` | 全部：`core.unit`（97）＋`data`（18）＋`e2e`（40），約 90 秒 |
+| `npm test` | 全部：`core.unit`（114）＋`data`（24）＋`e2e`（47），約 100 秒 |
 | `npm run test:unit` | 純函式＋資料一致性，約 3 秒 |
 | `npm run test:e2e` | 真的開 Chromium 點按鈕、真的下載檔案 |
 | `npm run build` | 重新產生 `data/diagrams.json` |
@@ -63,7 +87,9 @@ vendor/upstream/         上游範例圖的原樣副本＋LICENSE＋SOURCE.json�
 - 單元測試直接 `require` 站上那份 `app/core.js`，**不做副本**——副本會跟站上的碼悄悄走鐘，
   「測試全過但測的是舊碼」比沒測試更危險。
 - e2e 有一項專門攔 `page.on('request')` 驗證整趟操作沒有任何對外請求，**不要把它拿掉**，
-  那是這個站存在的理由。另有一項逐一開完 153 張範本，確認每一張都畫得出來、文字都抓得到。
+  那是這個站存在的理由。另有一項逐一開完 153 張範本，確認每一張都畫得出來、文字都抓得到，
+  並比對「畫面切出來的段數」與「純函式切出來的段數」——中文層是依序號對應的，
+  兩邊切法一旦不同，中文會整批錯位，而畫面上只是「字怪怪的」，不會報錯。
 - 錯誤訊息的測試一律斷言 `isVisible()`，不能只斷言 `textContent`：`.errbox` 預設 `display:none`，
   只塞文字不加 `.show` 會被 CSS 蓋掉，使用者一次都看不到。
 - **不能用 `file://` 開來測**：站上的資料是 `fetch()` 拿的，`file://` 底下會被瀏覽器擋。

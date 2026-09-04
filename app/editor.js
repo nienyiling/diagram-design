@@ -21,8 +21,19 @@
 
   function cacheEls() {
     ['stage', 'edKind', 'edHeading', 'edUse', 'edEyebrow', 'edTitleIn', 'paletteSel', 'scaleSel',
-      'fitChk', 'textList', 'textCount', 'dlPng', 'dlSvg', 'dlHtml', 'resetBtn',
-      'edErr', 'edOk', 'dlErr', 'pngNote', 'swatches'].forEach(function (id) { el[id] = $(id); });
+      'fitChk', 'zhChk', 'zhRow', 'zhNote', 'textList', 'textCount', 'dlPng', 'dlSvg', 'dlHtml',
+      'resetBtn', 'edErr', 'edOk', 'dlErr', 'pngNote', 'swatches'].forEach(function (id) { el[id] = $(id); });
+  }
+
+  /**
+   * 第 i 段現在該顯示什麼字，優先序：
+   *   使用者自己改的 → 中文層（有開的話）→ 範本原文
+   * 三層都走同一個函式，畫面、文字清單、下載才不會各說各話。
+   */
+  function effectiveText(i) {
+    if (state.edits[i] != null) return state.edits[i];
+    if (state.zhOn && state.d.zh && state.d.zh[i]) return state.d.zh[i];
+    return state.orig ? state.orig[i].text : '';
   }
 
   function show(node, msg) {
@@ -112,11 +123,11 @@
 
     var sf = scaleFactor(svg, box);
     units.forEach(function (u, i) {
-      var edit = state.edits[i];
-      if (edit == null) return;
-      var base = state.orig[i] || { width: 0 };
+      var base = state.orig[i] || { width: 0, text: '' };
+      var want = effectiveText(i);
+      if (want === base.text) return;
       var fs = parseFloat(window.getComputedStyle(u.node).fontSize) / (sf || 1);
-      setUnitText(u, edit, fs * 1.2);
+      setUnitText(u, want, fs * 1.2);
       if (!state.fit) return;
       var now = safeLen(u.node);
       /* 中文比英文寬，同樣的意思常常寬一倍。留 12% 的餘裕再開始縮，
@@ -201,7 +212,7 @@
       var ta = document.createElement('textarea');
       ta.id = 'dd-t' + i;
       ta.rows = 1;
-      ta.value = state.edits[i] != null ? state.edits[i] : o.text;
+      ta.value = effectiveText(i);
       ta.addEventListener('input', function () {
         state.edits[i] = ta.value;
         autoGrow(ta);
@@ -363,6 +374,7 @@
   function open(diagram) {
     cacheEls();
     fillPalettes();
+    var hasZh = DD.hasTranslation(diagram.zh);
     state = {
       d: diagram,
       edits: {},
@@ -371,14 +383,23 @@
       selected: null,
       paletteId: el.paletteSel.value || 'source',
       fit: el.fitChk.checked,
+      /* 有中文就預設先套上——使用者要的是中文的圖，原文只是備而不用 */
+      zhOn: hasZh,
       colors: diagram.dark ? DD.UPSTREAM_DARK : DD.UPSTREAM_LIGHT
     };
+
+    el.zhRow.hidden = !hasZh;
+    el.zhChk.checked = hasZh;
+    el.zhNote.textContent = diagram.zhKind === 'sample'
+      ? '這張已經有一整份公務情境的中文內容（' + diagram.zhCount + '／' + diagram.segs + ' 段），直接改成你自己的案子就好。'
+      : '這張只換得掉圖例、月份、是／否這類固定用字（' + diagram.zhCount + '／' + diagram.segs +
+        ' 段）；方塊裡的內容是範本自帶的示範資料，本來就要整段換掉。';
 
     el.edKind.textContent = diagram.typeZh + '　' + diagram.variantZh;
     el.edHeading.textContent = diagram.heading || diagram.title || diagram.typeZh;
     el.edUse.textContent = diagram.use || '';
-    el.edEyebrow.value = diagram.typeZh;
-    el.edTitleIn.value = '';
+    el.edEyebrow.value = (state.zhOn && diagram.zhEyebrow) || diagram.typeZh;
+    el.edTitleIn.value = state.zhOn ? (diagram.zhHeading || '') : '';
     show(el.edErr, '');
     show(el.edOk, '');
     show(el.dlErr, '');
@@ -409,6 +430,20 @@
       state.fit = el.fitChk.checked;
       render();
     });
+    el.zhChk.addEventListener('change', function () {
+      if (!state) return;
+      state.zhOn = el.zhChk.checked;
+      /* 只有「還沒被使用者動過」的標題才跟著切換，不然會把人家打好的字洗掉 */
+      var d = state.d;
+      if (el.edTitleIn.value === '' || el.edTitleIn.value === (d.zhHeading || '')) {
+        el.edTitleIn.value = state.zhOn ? (d.zhHeading || '') : '';
+      }
+      if (el.edEyebrow.value === d.typeZh || el.edEyebrow.value === (d.zhEyebrow || '')) {
+        el.edEyebrow.value = (state.zhOn && d.zhEyebrow) || d.typeZh;
+      }
+      render();
+      buildTextList();
+    });
     [el.edEyebrow, el.edTitleIn].forEach(function (input) {
       input.addEventListener('input', function () { show(el.edOk, ''); });
     });
@@ -419,8 +454,10 @@
       if (!state) return;
       state.edits = {};
       state.selected = null;
-      el.edTitleIn.value = '';
-      el.edEyebrow.value = state.d.typeZh;
+      state.zhOn = DD.hasTranslation(state.d.zh);
+      el.zhChk.checked = state.zhOn;
+      el.edTitleIn.value = state.zhOn ? (state.d.zhHeading || '') : '';
+      el.edEyebrow.value = (state.zhOn && state.d.zhEyebrow) || state.d.typeZh;
       el.paletteSel.value = 'source';
       state.paletteId = 'source';
       render();

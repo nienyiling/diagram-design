@@ -65,7 +65,8 @@
       q: $('q').value,
       type: $('typeSel').value,
       theme: $('themeSel').value,
-      common: $('commonChk').checked
+      common: $('commonChk').checked,
+      zhOnly: $('zhOnlyChk').checked
     };
   }
 
@@ -75,8 +76,9 @@
     if (observer) observer.disconnect();
     tiles.innerHTML = '';
 
+    var zhN = list.filter(function (d) { return d.zhKind === 'sample'; }).length;
     $('countLine').textContent = list.length
-      ? '找到 ' + list.length + ' 張範本（全庫共 ' + data.count + ' 張）'
+      ? '找到 ' + list.length + ' 張範本（其中 ' + zhN + ' 張已寫好整份中文內容・全庫共 ' + data.count + ' 張）'
       : '找不到符合的範本。';
     show($('galleryErr'), list.length ? '' : '換個關鍵字，或把「只看公務常用的類型」取消勾選再試一次。');
 
@@ -85,7 +87,8 @@
       var a = document.createElement('a');
       a.className = 'tile';
       a.href = '#/' + d.id;
-      a.setAttribute('aria-label', d.typeZh + '：' + (d.heading || d.title));
+      a.setAttribute('aria-label', d.typeZh + '：' +
+        ((d.zhKind === 'sample' && d.zhHeading) || d.heading || d.title));
 
       var thumb = document.createElement('div');
       thumb.className = 'thumb';
@@ -106,7 +109,15 @@
       b1.className = 'badge' + (d.dark ? ' dark' : '');
       b1.textContent = d.variantZh || '標準';
       t2.appendChild(b1);
-      t2.appendChild(document.createTextNode(d.heading || d.title || ''));
+      if (d.zhKind === 'sample') {
+        var b2 = document.createElement('span');
+        b2.className = 'badge zh';
+        b2.textContent = '中文範本';
+        t2.appendChild(b2);
+      }
+      /* 有整份中文的就顯示中文標題——列表上一眼看得出哪些打開就能用 */
+      t2.appendChild(document.createTextNode(
+        (d.zhKind === 'sample' && d.zhHeading) || d.heading || d.title || ''));
       var t3 = document.createElement('div');
       t3.className = 't3';
       t3.textContent = d.use || '';
@@ -180,7 +191,7 @@
   }
 
   function bind() {
-    ['q', 'typeSel', 'themeSel', 'commonChk'].forEach(function (id) {
+    ['q', 'typeSel', 'themeSel', 'commonChk', 'zhOnlyChk'].forEach(function (id) {
       var node = $(id);
       node.addEventListener('input', renderTiles);
       node.addEventListener('change', renderTiles);
