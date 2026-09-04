@@ -113,9 +113,25 @@
     'template': { zh: '空白起手式', use: '沒有內容的骨架，適合從零開始排' }
   };
 
-  /* 公務最常用的一批，首頁預設先給這些 */
-  var COMMON_TYPES = ['flowchart', 'org-chart', 'gantt', 'timeline', 'swimlane', 'process',
-    'state', 'layers', 'tree', 'quadrant', 'pyramid', 'venn', 'bar', 'line', 'journey', 'kanban'];
+  /* 首頁預設推的一批。
+     判準不是「公務常見」而是「Excel 做不到、自己排會排到崩潰」——
+     長條圖、折線圖、圓餅圖 Excel 兩下就有，不必來這裡；
+     真正難的是流程圖、泳道圖、組織圖這種要對齊方塊與連線的。
+     庫裡還是有長條圖與折線圖，只是不放在預設的視野裡。 */
+  var COMMON_TYPES = ['flowchart', 'swimlane', 'process', 'org-chart', 'gantt', 'timeline',
+    'state', 'tree', 'layers', 'quadrant', 'pyramid', 'venn', 'journey', 'kanban'];
+
+  /* 首頁最上面那排大按鈕：最常被要求、又最難自己排的七張，全部已經是中文的。
+     使用者第一眼要看到的是「我要畫的那張就在這」，不是 153 張的清單。 */
+  var STARTERS = [
+    { id: 'example-flowchart', label: '流程圖', note: '有判斷分支的作業流程' },
+    { id: 'example-swimlane', label: '泳道圖', note: '跨層級：哪一段是誰的責任' },
+    { id: 'example-process', label: '跨科室流轉', note: '案件從送件到結案走過哪些科' },
+    { id: 'example-org-chart', label: '組織圖', note: '單位、職務與分工' },
+    { id: 'example-gantt', label: '甘特圖', note: '各項工作的起迄與重疊' },
+    { id: 'example-timeline', label: '時間軸', note: '沿革、大事紀、期程' },
+    { id: 'example-state', label: '案件狀態流轉', note: '一件案子會處在哪些狀態' }
+  ];
 
   var VARIANT_ZH = {
     '': '標準', 'dark': '深色', 'full': '完整版', 'terminal': '終端機風',
@@ -427,6 +443,109 @@
   /** 去掉 HTML／XML 註解。上游的註解是給讀原始碼的人看的，搬到站上只是白佔位元組。 */
   function stripComments(text) {
     return String(text).replace(/<!--[\s\S]*?-->/g, '');
+  }
+
+  /* ── 整張圖換字體 ─────────────────────────────────────────────────
+     公文常用標楷體，簡報常用黑體。上游是「標題襯線、內文黑體、標籤等寬」的混搭，
+     多數時候好看，但要交出去的公文圖常常被要求整張統一。
+     一樣只寫字族名，絕不載 webfont——使用者機器上沒有標楷體時會退回系統襯線體。 */
+  var FONT_CHOICES = [
+    { id: 'source', name: '維持範本原本的搭配', stack: null },
+    { id: 'kai', name: '標楷體（公文常用）', stack: "'DFKai-SB','BiauKai','Kaiti TC','標楷體','Noto Serif TC',serif" },
+    { id: 'sans', name: '全部用黑體', stack: null },
+    { id: 'serif', name: '全部用明體／宋體', stack: "'Noto Serif TC','PMingLiU','Songti TC','MingLiU',serif" }
+  ];
+  /* sans 這一組直接沿用站上的黑體堆疊，不要再抄一份 */
+  FONT_CHOICES[2].stack = FONTS.sans;
+
+  function fontChoiceById(id) {
+    for (var i = 0; i < FONT_CHOICES.length; i++) if (FONT_CHOICES[i].id === id) return FONT_CHOICES[i];
+    return FONT_CHOICES[0];
+  }
+
+  /** 把整張圖的字族統一換成同一套。stack 給 null 就原樣回傳（維持範本原本的搭配）。 */
+  function forceFontFamily(text, stack) {
+    if (!stack) return String(text);
+    return String(text)
+      .replace(/font-family="[^"]*"/g, 'font-family="' + stack + '"')
+      .replace(/(--[\w-]*(?:sans|serif|mono)[\w-]*)\s*:\s*[^;}]+/gi, function (_, k) {
+        return k + ': ' + stack;
+      })
+      .replace(/font-family:\s*[^;}"]+/g, 'font-family: ' + stack);
+  }
+
+  /* ── 從 Excel 貼一整欄 ───────────────────────────────────────────
+     名單、科室、工作項目這些東西通常已經在 Excel 裡了，一格一格重打很花時間。
+     一行對一段；一行裡有多欄（tab）時併成「甲 · 乙」，不要拆成兩段——
+     拆了會讓後面每一段都錯位。 */
+  function splitPastedColumn(text) {
+    return String(text == null ? '' : text)
+      .split(/\r\n|\r|\n/)
+      .map(function (line) {
+        return line.split('\t').map(function (c) { return c.trim(); })
+          .filter(Boolean).join(' · ');
+      })
+      .filter(function (line) { return line.length > 0; });
+  }
+
+  /* ── 存檔／載入：把改到一半的東西留住 ─────────────────────────────
+     一張圖常常要改好幾次、跨好幾天，或是要交給同事接手。
+     存的是「使用者改了什麼」，不是整張 SVG——範本更新時舊設定照樣套得上去。 */
+  var PROJECT_VERSION = 1;
+
+  function buildProjectFile(o) {
+    var s = o || {};
+    return JSON.stringify({
+      format: 'gongwu-diagram',
+      version: PROJECT_VERSION,
+      savedAt: s.savedAt || new Date().toISOString().slice(0, 19).replace('T', ' '),
+      diagram: s.id,
+      diagramName: s.name || '',
+      palette: s.palette || 'source',
+      font: s.font || 'source',
+      fit: s.fit !== false,
+      zhOn: !!s.zhOn,
+      eyebrow: s.eyebrow || '',
+      heading: s.heading || '',
+      edits: s.edits || {},
+      source: SOURCE.credit
+    }, null, 2);
+  }
+
+  /**
+   * 讀回設定檔。壞掉的檔案要講人話，不要讓使用者看到 JSON.parse 的英文錯誤。
+   * 回傳整理過的物件；不合格就 throw，訊息直接拿去顯示。
+   */
+  function parseProjectFile(text) {
+    var data;
+    try {
+      data = JSON.parse(String(text));
+    } catch (e) {
+      throw new Error('這不是本站存出來的設定檔（檔案內容不是合法的 JSON）。');
+    }
+    if (!data || data.format !== 'gongwu-diagram') {
+      throw new Error('這不是本站存出來的設定檔，請選副檔名為 .json 的「圖表設定」檔。');
+    }
+    if (!(data.version <= PROJECT_VERSION)) {
+      throw new Error('這份設定檔是較新版本的站台存出來的（version ' + data.version +
+        '），本站看不懂。請更新頁面後再試一次。');
+    }
+    if (!data.diagram) throw new Error('設定檔裡沒有記錄是哪一張範本，無法套用。');
+    var edits = {};
+    Object.keys(data.edits || {}).forEach(function (k) {
+      if (/^\d+$/.test(k) && data.edits[k] != null) edits[k] = String(data.edits[k]);
+    });
+    return {
+      id: String(data.diagram),
+      name: String(data.diagramName || ''),
+      palette: String(data.palette || 'source'),
+      font: String(data.font || 'source'),
+      fit: data.fit !== false,
+      zhOn: !!data.zhOn,
+      eyebrow: String(data.eyebrow || ''),
+      heading: String(data.heading || ''),
+      edits: edits
+    };
   }
 
   /* ── CSS 收攏：把頁面的 CSS 塞進 SVG 裡，讓 SVG 自己站得住 ──────────── */
@@ -804,7 +923,7 @@
 
   return {
     SOURCE: SOURCE, FONTS: FONTS, PALETTES: PALETTES, TYPE_META: TYPE_META,
-    COMMON_TYPES: COMMON_TYPES, VARIANT_ZH: VARIANT_ZH,
+    COMMON_TYPES: COMMON_TYPES, STARTERS: STARTERS, VARIANT_ZH: VARIANT_ZH,
     UPSTREAM_LIGHT: UPSTREAM_LIGHT, UPSTREAM_DARK: UPSTREAM_DARK,
     escapeXml: escapeXml, normalizeHex: normalizeHex, hexToRgb: hexToRgb,
     extractSvg: extractSvg, extractDocument: extractDocument,
@@ -812,6 +931,9 @@
     stripNonVisual: stripNonVisual, normalizeSegment: normalizeSegment,
     extractTextSegments: extractTextSegments, glossaryLookup: glossaryLookup,
     translateSegments: translateSegments, hasTranslation: hasTranslation,
+    FONT_CHOICES: FONT_CHOICES, fontChoiceById: fontChoiceById, forceFontFamily: forceFontFamily,
+    splitPastedColumn: splitPastedColumn,
+    PROJECT_VERSION: PROJECT_VERSION, buildProjectFile: buildProjectFile, parseProjectFile: parseProjectFile,
     mapFontValue: mapFontValue, mapFonts: mapFonts, stripComments: stripComments,
     splitRules: splitRules, scopeCss: scopeCss, prefixKeyframes: prefixKeyframes,
     inlineCssIntoSvg: inlineCssIntoSvg,

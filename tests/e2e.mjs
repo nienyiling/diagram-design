@@ -66,13 +66,26 @@ await t('隱私承諾寫在首頁上', async () => {
   assert.ok((await page.locator('.privacy').innerText()).includes('資料不離開這台裝置'));
 });
 
-await t('預設先給公務常用的類型，而且真的有圖', async () => {
+await t('首頁最上面就是七個快捷入口，點下去直接進那張範本', async () => {
+  const starters = page.locator('.starter');
+  assert.equal(await starters.count(), 7);
+  assert.equal(await starters.first().getAttribute('href'), '#/example-flowchart');
+  assert.ok((await starters.first().innerText()).includes('流程圖'));
+});
+
+await t('預設只給 Excel 做不到的那種圖：長條圖、折線圖不在預設視野裡', async () => {
   assert.equal(await page.locator('#commonChk').isChecked(), true);
   const n = await page.locator('.tile').count();
-  assert.ok(n > 20, '常用類型只有 ' + n + ' 張');
+  assert.ok(n > 20, '預設只有 ' + n + ' 張');
+  const names = await page.locator('.tile .t1').allInnerTexts();
+  assert.ok(!names.includes('長條圖'), '長條圖不該出現在預設視野');
+  assert.ok(!names.includes('折線圖'), '折線圖不該出現在預設視野');
+  assert.ok(names.includes('流程圖') && names.includes('泳道圖'), names.slice(0, 6).join(' / '));
 });
 
 await t('縮圖真的畫出 SVG（不是留在「載入中」）', async () => {
+  /* 清單在第一屏外，跟使用者一樣先捲下去 */
+  await page.locator('#tiles').scrollIntoViewIfNeeded();
   await page.locator('.tile .thumb svg').first().waitFor({ state: 'attached', timeout: 10000 });
   const n = await page.locator('.tile .thumb svg').count();
   assert.ok(n > 3, '只畫出 ' + n + ' 張縮圖');
@@ -388,6 +401,106 @@ await t('下載的圖帶著中文內容', async () => {
   const text = fs.readFileSync(await download.path(), 'utf8');
   assert.ok(text.includes('收到新型態案件'), '中文內容沒有寫進下載檔');
   assert.ok(text.includes('案件要不要訂成標準作業程序'), '中文標題沒有寫進下載檔');
+});
+
+/* ── 後來加的幾個省事功能 ────────────────────────────────────────── */
+
+await t('換成標楷體，圖上的字族真的換掉', async () => {
+  await page.goto(server.url + '#/example-flowchart', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  await page.locator('#fontSel').selectOption('kai');
+  await page.waitForTimeout(300);
+  const fam = await page.evaluate(() =>
+    getComputedStyle(document.querySelector('#stage svg text')).fontFamily);
+  assert.ok(/DFKai-SB|BiauKai|Kaiti|標楷體/.test(fam), fam);
+  await page.locator('#fontSel').selectOption('source');
+  await page.waitForTimeout(200);
+});
+
+await t('從 Excel 貼一整欄，依序填進去', async () => {
+  await page.locator('details.paste summary').click();
+  await page.locator('#dd-t4').focus();
+  await page.locator('#pasteBox').fill('人事室\n主計室\n政風室');
+  await page.locator('#pasteBtn').click();
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('#dd-t4').inputValue(), '人事室');
+  assert.equal(await page.locator('#dd-t5').inputValue(), '主計室');
+  assert.equal(await page.locator('#dd-t6').inputValue(), '政風室');
+  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(svgText.includes('政風室'));
+  assert.ok((await page.locator('#edOk').innerText()).includes('填入了 3 段'));
+  assert.equal(await page.locator('#pasteBox').inputValue(), '', '填完要清空，不然會重複貼');
+});
+
+await t('貼上空白內容時，錯誤訊息是看得見的', async () => {
+  await page.locator('#pasteBox').fill('   ');
+  await page.locator('#pasteBtn').click();
+  await page.waitForTimeout(200);
+  assert.equal(await page.locator('#pasteErr').isVisible(), true);
+  assert.ok((await page.locator('#pasteErr').innerText()).includes('Excel'));
+  await page.locator('#pasteBox').fill('');
+});
+
+await t('存出設定檔：是 JSON、記著改了什麼、不含圖檔', async () => {
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 15000 }),
+    page.locator('#saveProjBtn').click()
+  ]);
+  const text = fs.readFileSync(await download.path(), 'utf8');
+  const json = JSON.parse(text);
+  assert.equal(json.format, 'gongwu-diagram');
+  assert.equal(json.diagram, 'example-flowchart');
+  assert.equal(json.edits['4'], '人事室');
+  assert.ok(!text.includes('<svg'), '設定檔不該包含圖檔');
+  fs.writeFileSync('/tmp/dd-proj.json', text);
+});
+
+await t('載入設定檔：文字回到存檔當時的樣子', async () => {
+  await page.locator('#resetBtn').click();
+  await page.waitForTimeout(300);
+  assert.notEqual(await page.locator('#dd-t4').inputValue(), '人事室');
+  await page.locator('#loadProjInput').setInputFiles('/tmp/dd-proj.json');
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator('#dd-t4').inputValue(), '人事室');
+  assert.equal(await page.locator('#edOk').isVisible(), true);
+  assert.ok((await page.locator('#edOk').innerText()).includes('已載入設定'));
+});
+
+await t('載入別張範本的設定檔時，說得出該去哪一張', async () => {
+  fs.writeFileSync('/tmp/dd-other.json', JSON.stringify({
+    format: 'gongwu-diagram', version: 1, diagram: 'example-gantt',
+    diagramName: '甘特圖：期程', edits: {}
+  }));
+  await page.locator('#loadProjInput').setInputFiles('/tmp/dd-other.json');
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('#dlErr').isVisible(), true);
+  const msg = await page.locator('#dlErr').innerText();
+  assert.ok(msg.includes('甘特圖'), msg);
+  assert.ok(msg.includes('example-gantt'), msg);
+});
+
+await t('載入壞掉的檔案時講人話，不是丟出 JSON 的英文錯誤', async () => {
+  fs.writeFileSync('/tmp/dd-bad.json', '這不是設定檔');
+  await page.locator('#loadProjInput').setInputFiles('/tmp/dd-bad.json');
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('#dlErr').isVisible(), true);
+  assert.ok((await page.locator('#dlErr').innerText()).includes('不是本站存出來的設定檔'));
+});
+
+await t('複製圖片到剪貼簿', async () => {
+  await ctx.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.locator('#copyPngBtn').click();
+  await page.waitForTimeout(1200);
+  const err = await page.locator('#dlErr').isVisible()
+    ? await page.locator('#dlErr').innerText() : '';
+  assert.equal(err, '', '複製失敗：' + err);
+  assert.ok((await page.locator('#edOk').innerText()).includes('已複製到剪貼簿'));
+});
+
+await t('不能轉 PNG 的範本，複製按鈕也一起停用', async () => {
+  await page.goto(server.url + '#/example-medallion', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  assert.equal(await page.locator('#copyPngBtn').isDisabled(), true);
 });
 
 /* ── 每一張圖都要畫得出來 ──────────────────────────────────────────── */

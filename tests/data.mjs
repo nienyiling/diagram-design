@@ -189,6 +189,14 @@ await t('中文內容裡沒有殘留的半形括號亂碼或未填的佔位', ()
   });
 });
 
+await t('首頁快捷入口的七張都存在，而且都已經寫好整份中文', () => {
+  DD.STARTERS.forEach((st) => {
+    const d = data.diagrams.find((x) => x.id === st.id);
+    assert.ok(d, '快捷入口指到不存在的範本：' + st.id);
+    assert.equal(d.zhKind, 'sample', st.id + ' 還沒有整份中文，不該放在快捷入口');
+  });
+});
+
 await t('資料裡帶著上游來源與授權', () => {
   assert.equal(data.source.repo, 'cathrynlavery/diagram-design');
   assert.equal(data.source.license, 'MIT');

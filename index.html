@@ -88,6 +88,15 @@
   .okbox.show{display:block;}
 
   /* 範本列表 */
+  /* 首頁最上面那排快捷入口：一眼看到自己要畫的那一種 */
+  .starters{display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; margin-top:14px;}
+  .starter{display:flex; flex-direction:column; gap:3px; padding:14px 14px 13px;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:8px;
+    text-decoration:none; color:inherit; min-height:74px; transition:border-color .15s, background .15s;}
+  .starter:hover{border-color:var(--seal); background:var(--seal-wash);}
+  .starter:focus-visible{outline:3px solid var(--seal-wash); outline-offset:2px; border-color:var(--seal);}
+  .starter b{font-family:var(--serif); font-size:15.5px; font-weight:700;}
+  .starter span{font-size:11.5px; color:var(--ink-soft); line-height:1.45;}
   .countline{margin:14px 2px 6px; font-size:13px; color:var(--ink-soft);}
   .tiles{display:grid; grid-template-columns:repeat(auto-fill,minmax(216px,1fr)); gap:14px; margin-top:6px;}
   .tile{display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line);
@@ -121,6 +130,21 @@
   .trow textarea{width:100%; font-family:var(--sans); font-size:15px; color:var(--ink); background:#fff;
     border:1px solid var(--line); border-radius:8px; padding:8px 10px; min-height:42px; resize:vertical;
     line-height:1.45;}
+  details.paste{border:1px solid var(--line-soft); border-radius:8px; padding:10px 12px;
+    background:var(--surface-2); margin:14px 0;}
+  details.paste summary{cursor:pointer; font-size:13.5px; font-weight:500; min-height:28px;
+    display:flex; align-items:center;}
+  details.paste summary:focus-visible{outline:3px solid var(--seal-wash); outline-offset:2px;}
+  details.paste textarea{width:100%; font-family:var(--sans); font-size:15px; color:var(--ink);
+    background:#fff; border:1px solid var(--line); border-radius:8px; padding:8px 10px;
+    margin-top:10px; resize:vertical;}
+  /* 「選檔案」要長得跟其他按鈕一樣，原生的 file input 在各家瀏覽器長相不一 */
+  .filebtn{display:inline-flex; align-items:center; justify-content:center; cursor:pointer;
+    font-size:15px; font-weight:500; background:#fff; border:1px solid var(--line); color:var(--ink);
+    padding:12px 18px; border-radius:8px; min-height:48px; transition:border-color .15s;}
+  .filebtn:hover{border-color:var(--seal); color:var(--seal);}
+  .filebtn:focus-within{outline:3px solid var(--seal-wash); outline-offset:2px; border-color:var(--seal);}
+  .filebtn input{position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;}
   .swatches{display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;}
   .swatch{display:flex; gap:6px; align-items:center; font-size:12px; color:var(--ink-soft);}
   .swatch i{width:16px; height:16px; border-radius:4px; border:1px solid rgba(0,0,0,.15); display:block;}
@@ -157,8 +181,9 @@
       <p class="source">圖表範本取自
         <a href="https://github.com/cathrynlavery/diagram-design" target="_blank" rel="noopener noreferrer">github.com/cathrynlavery/diagram-design</a>
         ・MIT License・Cathryn Lavery</p>
-      <p class="lede">153 張排好版的圖表範本，挑一張、把英文改成中文、換成公文用得上的配色，
-        下載 PNG 貼進 Word 或簡報。流程圖、組織圖、甘特圖、時間軸、泳道圖都在裡面。</p>
+      <p class="lede">流程圖、泳道圖、組織圖這種在 Word 裡拉半天還是對不齊的圖，
+        這裡是<strong>已經排好的</strong>。挑一張、把字改成你的案子、下載貼進簽稿或簡報——
+        不必開 Visio，也不必自己對齊框線。（長條圖、折線圖 Excel 兩下就有，這裡不必用。）</p>
       <p class="privacy">全程在你的瀏覽器裡完成，沒有上傳、沒有後端，資料不離開這台裝置</p>
     </header>
 
@@ -175,7 +200,13 @@
     </div>
 
     <div class="card">
-      <h2>挑一張範本</h2>
+      <h2>先從這幾張開始</h2>
+      <p class="hint">最常被要求、又最難自己排的七種。點下去就是排好的中文圖，改成你的案子即可。</p>
+      <div class="starters" id="starters"></div>
+    </div>
+
+    <div class="card">
+      <h2>或是從 153 張裡挑</h2>
       <div class="grid c3">
         <div>
           <label class="fl" for="q">搜尋（中文名、用途、英文標題都可以）</label>
@@ -195,7 +226,8 @@
         </div>
       </div>
       <label class="checkline"><input type="checkbox" id="commonChk" checked>
-        <span>只看公務常用的類型（流程圖、組織圖、甘特圖、時間軸、泳道圖…）</span></label>
+        <span>只看 Excel 做不到的那種圖（流程圖、泳道圖、組織圖、甘特圖…）。
+          取消勾選才會出現長條圖、折線圖這類 Excel 本來就有的。</span></label>
       <label class="checkline"><input type="checkbox" id="zhOnlyChk">
         <span>只看已經寫好整份中文內容的（打開就是公文情境，改成你自己的案子就好）</span></label>
       <p class="countline" id="countLine" role="status" aria-live="polite"></p>
@@ -237,6 +269,10 @@
           <select id="paletteSel"></select>
         </div>
         <div>
+          <label class="fl" for="fontSel">字體</label>
+          <select id="fontSel"></select>
+        </div>
+        <div>
           <label class="fl" for="scaleSel">PNG 解析度</label>
           <select id="scaleSel">
             <option value="1">1 倍（螢幕看）</option>
@@ -256,6 +292,20 @@
     <div class="card">
       <h2>圖上的文字</h2>
       <p class="hint" id="textCount"></p>
+
+      <details class="paste">
+        <summary>從 Excel 貼一整欄</summary>
+        <p class="hint">名單、科室、工作項目通常已經在 Excel 裡了。在 Excel 選一整欄複製，
+          貼進下面的框按「填入」，會從<strong>目前選取的那一段</strong>開始依序填（沒選就從第 1 段起）。
+          一行對一段；一行裡有多欄會併成「甲 · 乙」，不會拆成兩段。</p>
+        <label class="sr-only" for="pasteBox">從 Excel 貼上的內容</label>
+        <textarea id="pasteBox" rows="4" placeholder="人事室&#10;主計室&#10;政風室"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button type="button" id="pasteBtn">填入</button>
+        </div>
+        <p class="errbox" id="pasteErr" role="alert"></p>
+      </details>
+
       <div id="textList"></div>
     </div>
 
@@ -264,11 +314,21 @@
       <p class="hint">PNG 給 Word 與簡報用；SVG 是向量檔，放大不糊；HTML 可以離線開、用瀏覽器列印成 PDF。
         三種都會在圖的下方帶一行來源標註。</p>
       <div class="row">
-        <button type="button" class="primary" id="dlPng">下載 PNG</button>
+        <button type="button" class="primary" id="copyPngBtn">複製圖片到剪貼簿</button>
+        <button type="button" id="dlPng">下載 PNG</button>
         <button type="button" id="dlSvg">下載 SVG</button>
         <button type="button" id="dlHtml">下載 HTML</button>
+      </div>
+      <p class="hint">最省事的是「複製圖片到剪貼簿」：按完直接到 Word 或簡報按 Ctrl+V，
+        不必先存檔再插入圖片。</p>
+      <div class="row">
+        <button type="button" id="saveProjBtn">存出設定檔</button>
+        <label class="filebtn" for="loadProjInput">載入設定檔
+          <input type="file" id="loadProjInput" accept=".json,application/json"></label>
         <button type="button" id="resetBtn">全部復原</button>
       </div>
+      <p class="hint">改到一半可以「存出設定檔」（一個小小的 .json），下次在同一張範本按「載入設定檔」
+        就接著改，也可以傳給同事接手。設定檔只記你改了什麼，不含圖檔本身。</p>
       <p class="okbox" id="edOk" role="status" aria-live="polite"></p>
       <p class="errbox" id="dlErr" role="alert"></p>
       <p class="hint" id="pngNote" hidden></p>

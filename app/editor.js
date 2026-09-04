@@ -21,8 +21,10 @@
 
   function cacheEls() {
     ['stage', 'edKind', 'edHeading', 'edUse', 'edEyebrow', 'edTitleIn', 'paletteSel', 'scaleSel',
-      'fitChk', 'zhChk', 'zhRow', 'zhNote', 'textList', 'textCount', 'dlPng', 'dlSvg', 'dlHtml',
-      'resetBtn', 'edErr', 'edOk', 'dlErr', 'pngNote', 'swatches'].forEach(function (id) { el[id] = $(id); });
+      'fontSel', 'fitChk', 'zhChk', 'zhRow', 'zhNote', 'textList', 'textCount',
+      'pasteBox', 'pasteBtn', 'pasteErr', 'copyPngBtn', 'saveProjBtn', 'loadProjInput',
+      'dlPng', 'dlSvg', 'dlHtml', 'resetBtn', 'edErr', 'edOk', 'dlErr', 'pngNote', 'swatches']
+      .forEach(function (id) { el[id] = $(id); });
   }
 
   /**
@@ -98,6 +100,7 @@
     var d = state.d;
     var res = DD.resolveColors(state.paletteId, d.dark);
     var markup = res.to ? DD.applyPalette(d.svg, res.from, res.to) : d.svg;
+    markup = DD.forceFontFamily(markup, DD.fontChoiceById(state.font).stack);
     state.colors = res.colors;
 
     el.stage.innerHTML = markup;
@@ -308,53 +311,173 @@
    * <img> 裡的 SVG 不會去抓任何外部資源，所以這一步一樣是零對外連線；
    * 但也因此 <foreignObject> 不會被畫出來——那幾張圖的 PNG 按鈕會直接停用。
    */
+  function makePng() {
+    return new Promise(function (resolve, reject) {
+      var scale = parseFloat(el.scaleSel.value) || 2;
+      var blob = new Blob([DD.svgFile(composed())], { type: 'image/svg+xml;charset=utf-8' });
+      var url = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var w = Math.round((img.naturalWidth || 1000) * scale);
+          var h = Math.round((img.naturalHeight || 600) * scale);
+          var canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          var ctx = canvas.getContext('2d');
+          ctx.fillStyle = (state.colors && state.colors.paper) || '#ffffff';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          canvas.toBlob(function (out) {
+            URL.revokeObjectURL(url);
+            if (!out) reject(new Error('畫不出圖片'));
+            else resolve({ blob: out, w: w, h: h });
+          }, 'image/png');
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          reject(e);
+        }
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error('圖片載不進來'));
+      };
+      img.src = url;
+    });
+  }
+
   function savePng() {
     show(el.dlErr, '');
     show(el.edOk, '');
-    var scale = parseFloat(el.scaleSel.value) || 2;
-    var svgText = DD.svgFile(composed());
-    var blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
-    var url = URL.createObjectURL(blob);
-    var img = new Image();
-    img.onload = function () {
+    makePng().then(function (r) {
+      download(r.blob, DD.safeFilename(baseName(), 'png'));
+      show(el.edOk, '已下載 PNG（' + r.w + '×' + r.h + '）。');
+    }).catch(function (e) {
+      show(el.dlErr, '這張圖轉不成 PNG（' + e.message + '），請改用 SVG 或 HTML 下載。');
+    });
+  }
+
+  /**
+   * 直接複製到剪貼簿，省下「先存檔、再插入圖片」那兩步——
+   * 對「改一張圖貼進簽稿」這種一次性的事，這才是最短路徑。
+   * 需要瀏覽器支援 ClipboardItem，而且要在 https 底下；不支援時要講清楚替代做法。
+   */
+  function copyPng() {
+    show(el.dlErr, '');
+    show(el.edOk, '');
+    if (!(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write)) {
+      show(el.dlErr, '這個瀏覽器不支援直接複製圖片到剪貼簿，請改按「下載 PNG」，再從 Word 插入圖片。');
+      return;
+    }
+    makePng().then(function (r) {
+      return navigator.clipboard.write([new window.ClipboardItem({ 'image/png': r.blob })])
+        .then(function () {
+          show(el.edOk, '已複製到剪貼簿（' + r.w + '×' + r.h + '），到 Word 或簡報按 Ctrl+V 貼上。');
+        });
+    }).catch(function (e) {
+      show(el.dlErr, '複製到剪貼簿失敗（' + e.message + '）。請改按「下載 PNG」，再從 Word 插入圖片。');
+    });
+  }
+
+  /* ── 存檔與載入：改到一半可以留住，也能交給同事接手 ─────────────────── */
+
+  function saveProject() {
+    show(el.dlErr, '');
+    try {
+      var text = DD.buildProjectFile({
+        id: state.d.id,
+        name: state.d.typeZh + '：' + (el.edTitleIn.value || state.d.heading || ''),
+        palette: state.paletteId,
+        font: state.font,
+        fit: state.fit,
+        zhOn: state.zhOn,
+        eyebrow: el.edEyebrow.value,
+        heading: el.edTitleIn.value,
+        edits: state.edits
+      });
+      download(new Blob([text], { type: 'application/json;charset=utf-8' }),
+        DD.safeFilename(baseName() + '（圖表設定）', 'json'));
+      show(el.edOk, '已存出設定檔。下次在同一張範本按「載入設定」就能接著改，也可以傳給同事。');
+    } catch (e) {
+      show(el.dlErr, '存設定檔時出錯：' + e.message);
+    }
+  }
+
+  function loadProject(file) {
+    show(el.dlErr, '');
+    show(el.edOk, '');
+    var reader = new FileReader();
+    reader.onerror = function () { show(el.dlErr, '這個檔案讀不進來，請確認檔案沒有損壞。'); };
+    reader.onload = function () {
+      var p;
       try {
-        var w = Math.round((img.naturalWidth || 1000) * scale);
-        var h = Math.round((img.naturalHeight || 600) * scale);
-        var canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        var ctx = canvas.getContext('2d');
-        ctx.fillStyle = (state.colors && state.colors.paper) || '#ffffff';
-        ctx.fillRect(0, 0, w, h);
-        ctx.drawImage(img, 0, 0, w, h);
-        canvas.toBlob(function (out) {
-          URL.revokeObjectURL(url);
-          if (!out) { show(el.dlErr, '這張圖轉不成 PNG，請改用 SVG 或 HTML 下載。'); return; }
-          download(out, DD.safeFilename(baseName(), 'png'));
-          show(el.edOk, '已下載 PNG（' + w + '×' + h + '）。');
-        }, 'image/png');
+        p = DD.parseProjectFile(reader.result);
       } catch (e) {
-        URL.revokeObjectURL(url);
-        show(el.dlErr, '轉 PNG 時出錯：' + e.message + '。請改用 SVG 或 HTML 下載。');
+        show(el.dlErr, e.message);
+        return;
       }
+      if (p.id !== state.d.id) {
+        /* 不偷偷跳頁：給一條看得見的連結，使用者自己決定要不要換過去 */
+        show(el.dlErr, '這份設定是給另一張範本用的（' + (p.name || p.id) + '）。\n' +
+          '請先打開那一張，再載入這份設定：' + location.origin + location.pathname + '#/' + p.id);
+        return;
+      }
+      state.edits = p.edits;
+      state.paletteId = p.palette;
+      state.font = p.font;
+      state.fit = p.fit;
+      state.zhOn = p.zhOn && DD.hasTranslation(state.d.zh);
+      el.paletteSel.value = state.paletteId;
+      el.fontSel.value = state.font;
+      el.fitChk.checked = state.fit;
+      el.zhChk.checked = state.zhOn;
+      el.edEyebrow.value = p.eyebrow;
+      el.edTitleIn.value = p.heading;
+      render();
+      buildTextList();
+      renderSwatches();
+      show(el.edOk, '已載入設定，' + Object.keys(p.edits).length + ' 段文字回到你上次改的樣子。');
     };
-    img.onerror = function () {
-      URL.revokeObjectURL(url);
-      show(el.dlErr, '這張圖轉不成 PNG，請改用 SVG 或 HTML 下載。');
-    };
-    img.src = url;
+    reader.readAsText(file, 'utf-8');
+  }
+
+  /* ── 從 Excel 貼一整欄 ───────────────────────────────────────────── */
+
+  function applyPaste() {
+    show(el.dlErr, '');
+    show(el.pasteErr, '');
+    var lines = DD.splitPastedColumn(el.pasteBox.value);
+    if (!lines.length) {
+      show(el.pasteErr, '貼上的內容是空的。請從 Excel 選一整欄複製，再貼進這個框。');
+      return;
+    }
+    var start = state.selected == null ? 0 : state.selected;
+    var room = state.orig.length - start;
+    for (var i = 0; i < lines.length && i < room; i++) state.edits[start + i] = lines[i];
+    render();
+    buildTextList();
+    selectUnit(start, false);
+    var used = Math.min(lines.length, room);
+    show(el.edOk, '從第 ' + (start + 1) + ' 段起填入了 ' + used + ' 段' +
+      (lines.length > room ? '；剩下的 ' + (lines.length - room) + ' 行沒有位置放，被略過了。' : '。'));
+    el.pasteBox.value = '';
   }
 
   /* ── 對外介面 ────────────────────────────────────────────────────── */
 
-  function fillPalettes() {
-    if (el.paletteSel.options.length) return;
-    DD.PALETTES.forEach(function (p) {
+  function fillSelect(node, items) {
+    if (node.options.length) return;
+    items.forEach(function (it) {
       var o = document.createElement('option');
-      o.value = p.id;
-      o.textContent = p.name;
-      el.paletteSel.appendChild(o);
+      o.value = it.id;
+      o.textContent = it.name;
+      node.appendChild(o);
     });
+  }
+
+  function fillPalettes() {
+    fillSelect(el.paletteSel, DD.PALETTES);
+    fillSelect(el.fontSel, DD.FONT_CHOICES);
   }
 
   function renderSwatches() {
@@ -382,12 +505,15 @@
       units: [],
       selected: null,
       paletteId: el.paletteSel.value || 'source',
+      font: el.fontSel.value || 'source',
       fit: el.fitChk.checked,
       /* 有中文就預設先套上——使用者要的是中文的圖，原文只是備而不用 */
       zhOn: hasZh,
       colors: diagram.dark ? DD.UPSTREAM_DARK : DD.UPSTREAM_LIGHT
     };
 
+    el.pasteBox.value = '';
+    show(el.pasteErr, '');
     el.zhRow.hidden = !hasZh;
     el.zhChk.checked = hasZh;
     el.zhNote.textContent = diagram.zhKind === 'sample'
@@ -409,6 +535,7 @@
     renderSwatches();
 
     el.dlPng.disabled = !diagram.png;
+    el.copyPngBtn.disabled = !diagram.png;
     el.pngNote.hidden = !!diagram.png;
     if (!diagram.png) {
       el.pngNote.textContent = '這張範本用到了 SVG 的 foreignObject，瀏覽器不會把它畫進 PNG 裡，' +
@@ -424,6 +551,19 @@
       state.paletteId = el.paletteSel.value;
       render();
       renderSwatches();
+    });
+    el.fontSel.addEventListener('change', function () {
+      if (!state) return;
+      state.font = el.fontSel.value;
+      render();
+    });
+    el.pasteBtn.addEventListener('click', applyPaste);
+    el.copyPngBtn.addEventListener('click', copyPng);
+    el.saveProjBtn.addEventListener('click', saveProject);
+    el.loadProjInput.addEventListener('change', function () {
+      var f = el.loadProjInput.files && el.loadProjInput.files[0];
+      if (f) loadProject(f);
+      el.loadProjInput.value = '';
     });
     el.fitChk.addEventListener('change', function () {
       if (!state) return;
@@ -460,6 +600,10 @@
       el.edEyebrow.value = (state.zhOn && state.d.zhEyebrow) || state.d.typeZh;
       el.paletteSel.value = 'source';
       state.paletteId = 'source';
+      el.fontSel.value = 'source';
+      state.font = 'source';
+      el.pasteBox.value = '';
+      show(el.pasteErr, '');
       render();
       buildTextList();
       renderSwatches();

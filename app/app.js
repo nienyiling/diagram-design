@@ -37,6 +37,7 @@
       .then(function (json) {
         data = json;
         json.diagrams.forEach(function (d) { byId[d.id] = d; });
+        fillStarters();
         fillTypes();
         bind();
         route();
@@ -46,6 +47,26 @@
           '這個站要透過網址開啟才會動；如果是把檔案下載下來直接點開（file://），' +
           '瀏覽器會擋住讀取本機檔案，請改用線上網址。');
       });
+  }
+
+  /* 快捷入口。範本不在資料裡就跳過那一格，不要留一個點不動的死按鈕。 */
+  function fillStarters() {
+    var box = $('starters');
+    box.innerHTML = '';
+    DD.STARTERS.forEach(function (st) {
+      var d = byId[st.id];
+      if (!d) return;
+      var a = document.createElement('a');
+      a.className = 'starter';
+      a.href = '#/' + st.id;
+      var b = document.createElement('b');
+      b.textContent = st.label;
+      var note = document.createElement('span');
+      note.textContent = st.note;
+      a.appendChild(b);
+      a.appendChild(note);
+      box.appendChild(a);
+    });
   }
 
   function fillTypes() {
@@ -160,7 +181,9 @@
         fillThumb(en.target);
         observer.unobserve(en.target);
       });
-    }, { rootMargin: '300px' });
+      /* 提前 600px 就開始塞：首頁上面有快捷入口與篩選器，
+         清單本來就在第一屏外，抓太緊的話使用者一捲下來會先看到一排「載入中」 */
+    }, { rootMargin: '600px' });
     Array.prototype.forEach.call(nodes, function (n) { observer.observe(n); });
   }
 

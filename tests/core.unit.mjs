@@ -286,6 +286,108 @@ await t('字族堆疊都留了通用字族當退路', () => {
   assert.match(DD.FONTS.mono, /monospace$/);
 });
 
+/* ── 整張圖換字體 ────────────────────────────────────────────────── */
+await t('forceFontFamily 把屬性、CSS 宣告與自訂屬性一起換掉', () => {
+  const svg = '<svg><style>.a{font-family: x;} :root{--sans: y;}</style>'
+    + '<text font-family="z">字</text></svg>';
+  const out = DD.forceFontFamily(svg, "'標楷體',serif");
+  assert.equal((out.match(/標楷體/g) || []).length, 3, out);
+});
+await t('forceFontFamily 給 null 就不動（維持範本原本的搭配）', () => {
+  const svg = '<text font-family="z">字</text>';
+  assert.equal(DD.forceFontFamily(svg, null), svg);
+});
+await t('字體選項都只寫字族名，沒有 webfont', () => {
+  DD.FONT_CHOICES.forEach((c) => {
+    if (!c.stack) return;
+    assert.ok(!c.stack.includes('"'), c.id + ' 用了雙引號，SVG 屬性會炸掉');
+    assert.ok(!/url\(|http/.test(c.stack), c.id);
+  });
+});
+await t('標楷體那組留了襯線體當退路（沒裝標楷體的機器也看得到字）', () => {
+  assert.match(DD.fontChoiceById('kai').stack, /serif$/);
+});
+await t('fontChoiceById 找不到就給原版', () => {
+  assert.equal(DD.fontChoiceById('nope').id, 'source');
+  assert.equal(DD.fontChoiceById('kai').id, 'kai');
+});
+
+/* ── 從 Excel 貼一整欄 ──────────────────────────────────────────── */
+await t('splitPastedColumn 一行一段，空行丟掉', () => {
+  assert.deepEqual(DD.splitPastedColumn('人事室\n\n主計室\n政風室\n'),
+    ['人事室', '主計室', '政風室']);
+});
+await t('splitPastedColumn 一行多欄併成一段，不拆成兩段（拆了後面全錯位）', () => {
+  assert.deepEqual(DD.splitPastedColumn('甲\t乙\n丙\t丁'), ['甲 · 乙', '丙 · 丁']);
+});
+await t('splitPastedColumn 吃得下 Windows 換行與前後空白', () => {
+  assert.deepEqual(DD.splitPastedColumn('  甲  \r\n 乙 '), ['甲', '乙']);
+});
+await t('splitPastedColumn 空白輸入回空陣列', () => {
+  assert.deepEqual(DD.splitPastedColumn(''), []);
+  assert.deepEqual(DD.splitPastedColumn('   \n  '), []);
+  assert.deepEqual(DD.splitPastedColumn(null), []);
+});
+
+/* ── 設定檔 ─────────────────────────────────────────────────────── */
+await t('設定檔存的是「改了什麼」，不是整張圖', () => {
+  const json = JSON.parse(DD.buildProjectFile({ id: 'example-flowchart', edits: { 0: '甲' } }));
+  assert.equal(json.format, 'gongwu-diagram');
+  assert.equal(json.diagram, 'example-flowchart');
+  assert.deepEqual(json.edits, { 0: '甲' });
+  assert.ok(!JSON.stringify(json).includes('<svg'), '不該把圖檔存進去');
+  assert.ok(json.source.includes('cathrynlavery'), '設定檔也帶著來源標註');
+});
+await t('設定檔存得回、讀得回，內容一致', () => {
+  const o = {
+    id: 'example-gantt', palette: 'gongwu', font: 'kai', fit: false, zhOn: true,
+    eyebrow: '甘特圖', heading: '期程', edits: { 3: '需求盤點' }
+  };
+  const back = DD.parseProjectFile(DD.buildProjectFile(o));
+  ['id', 'palette', 'font', 'fit', 'zhOn', 'eyebrow', 'heading'].forEach((k) => {
+    assert.deepEqual(back[k], o[k], k);
+  });
+  assert.deepEqual(back.edits, { 3: '需求盤點' });
+});
+await t('讀到不是 JSON 的檔案時講人話', () => {
+  assert.throws(() => DD.parseProjectFile('這不是 json'), /不是本站存出來的設定檔/);
+});
+await t('讀到別的工具的 JSON 時講人話', () => {
+  assert.throws(() => DD.parseProjectFile('{"a":1}'), /不是本站存出來的設定檔/);
+});
+await t('讀到更新版的設定檔時講人話，而不是靜靜套錯', () => {
+  const future = JSON.stringify({ format: 'gongwu-diagram', version: 99, diagram: 'x' });
+  assert.throws(() => DD.parseProjectFile(future), /較新版本/);
+});
+await t('設定檔沒記錄範本時擋下來', () => {
+  const bad = JSON.stringify({ format: 'gongwu-diagram', version: 1 });
+  assert.throws(() => DD.parseProjectFile(bad), /沒有記錄是哪一張範本/);
+});
+await t('設定檔裡不是數字序號的 key 會被丟掉（別人手改壞的檔案不該炸掉頁面）', () => {
+  const messy = JSON.stringify({
+    format: 'gongwu-diagram', version: 1, diagram: 'x',
+    edits: { 0: '好的', abc: '壞的', 2: null }
+  });
+  assert.deepEqual(DD.parseProjectFile(messy).edits, { 0: '好的' });
+});
+
+/* ── 首頁快捷入口 ───────────────────────────────────────────────── */
+await t('快捷入口指到的都是真的範本 id，而且有中文標籤', () => {
+  DD.STARTERS.forEach((st) => {
+    assert.match(st.id, /^example-/, st.id);
+    assert.ok(st.label && /[\u4e00-\u9fff]/.test(st.label), st.id);
+    assert.ok(st.note && st.note.length > 0, st.id);
+  });
+});
+await t('預設視野不放 Excel 本來就做得到的圖', () => {
+  ['bar', 'line', 'scatter', 'polar'].forEach((t2) => {
+    assert.ok(DD.COMMON_TYPES.indexOf(t2) < 0, t2 + ' 不該在預設視野裡');
+  });
+  ['flowchart', 'swimlane', 'org-chart'].forEach((t2) => {
+    assert.ok(DD.COMMON_TYPES.indexOf(t2) >= 0, t2);
+  });
+});
+
 /* ── CSS 收攏 ────────────────────────────────────────────────────── */
 await t('splitRules 切得出巢狀大括號的規則', () => {
   const r = DD.splitRules('a{b:1}@media (x){c{d:2}}e{f:3}');
