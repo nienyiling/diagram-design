@@ -2,11 +2,11 @@
   "name": "diagram-design-gongwu",
   "version": "1.0.0",
   "private": true,
-  "description": "公務用圖表範本庫：純前端、零對外連線的圖表範本挑選與改字工具",
+  "description": "公務用圖表工具：填表產生流程圖、甘特圖、時間軸、分層圖、四象限，另有範本可改字。純前端、零對外連線",
   "scripts": {
     "build": "node scripts/build-data.mjs",
-    "test": "node tests/core.unit.mjs && node tests/data.mjs && node tests/e2e.mjs",
-    "test:unit": "node tests/core.unit.mjs && node tests/data.mjs",
+    "test": "node tests/core.unit.mjs && node tests/gen.unit.mjs && node tests/data.mjs && node tests/e2e.mjs",
+    "test:unit": "node tests/core.unit.mjs && node tests/gen.unit.mjs && node tests/data.mjs",
     "test:e2e": "node tests/e2e.mjs",
     "start": "node -e \"import('./tests/helpers.mjs').then(async m=>{const s=await m.serve();console.log(s.url)})\""
   },

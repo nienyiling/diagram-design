@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>公務用圖表範本庫</title>
-<meta name="description" content="153 張現成的編輯風格圖表範本，可線上改成中文、換配色，下載 PNG／SVG／HTML。全程在你的瀏覽器裡完成，資料不會上傳。">
+<title>公務用圖表工具</title>
+<meta name="description" content="填表就產生流程圖、甘特圖、時間軸、分層圖、四象限，版面由程式排；另有 153 張現成範本可改字。全程在你的瀏覽器裡完成，資料不會上傳。">
 <style>
   /* 視覺跟「公務用工具箱」（gongwu-calc）對齊：暖紙底、印章紅、標題襯線體。
      字型只寫字族名、不載任何 webfont——本站鐵律是零對外連線，
@@ -99,6 +99,36 @@
   .starter.make b{color:var(--seal);}
   .starter b{font-family:var(--serif); font-size:15.5px; font-weight:700;}
   .starter span{font-size:11.5px; color:var(--ink-soft); line-height:1.45;}
+  /* 首頁最上面：五種「自己做一張」的入口。縮圖是產生器自己畫出來的示意圖，
+     不是範本——使用者看到什麼，填完表就會得到什麼形狀的東西。 */
+  .makes{display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px; margin-top:14px;}
+  .make{display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line);
+    border-radius:var(--r); overflow:hidden; text-decoration:none; color:inherit;
+    transition:border-color .15s, transform .12s;}
+  .make:hover{border-color:var(--seal); transform:translateY(-1px);}
+  .make:focus-visible{outline:3px solid var(--seal-wash); outline-offset:2px; border-color:var(--seal);}
+  .make .shot{background:var(--surface-2); border-bottom:1px solid var(--line-soft);
+    height:132px; display:flex; align-items:center; justify-content:center; padding:8px; overflow:hidden;}
+  .make .shot svg{width:100%; height:100%; display:block; pointer-events:none;}
+  .make .meta{padding:12px 14px 14px;}
+  .make .t1{font-family:var(--serif); font-weight:700; font-size:16.5px;}
+  .make .t1 .go{color:var(--seal); font-size:13px; font-family:var(--sans); font-weight:500; margin-left:6px;}
+  .make .t2{font-size:12.5px; color:var(--ink-soft); margin-top:4px; line-height:1.5;}
+
+  /* 產生器的表單：一列一個項目，窄螢幕就自己折行 */
+  .frow,.mrow{display:flex; gap:10px; align-items:flex-start; padding:12px 0;}
+  .frow{border-top:1px solid var(--line-soft);}
+  .frow:first-child{border-top:0;}
+  .mrow{padding-bottom:4px;}
+  .fno{flex:none; width:24px; padding-top:26px; font-size:12px; color:var(--ink-faint);
+    font-variant-numeric:tabular-nums; text-align:right;}
+  .ffields{flex:1 1 auto; display:flex; gap:10px; flex-wrap:wrap; min-width:0;}
+  .fcell{flex:1 1 160px; min-width:0;}
+  .fcell.fcheck{flex:0 0 auto; display:flex; flex-direction:column; align-items:flex-start;}
+  .fcell.fcheck input{width:22px; height:22px; accent-color:var(--seal); margin-top:8px;}
+  .fbtns{flex:none; display:flex; gap:4px; padding-top:22px;}
+  button.ficon{min-height:36px; min-width:36px; padding:0; font-size:15px; line-height:1;
+    border-radius:7px; color:var(--ink-soft);}
   .countline{margin:14px 2px 6px; font-size:13px; color:var(--ink-soft);}
   .tiles{display:grid; grid-template-columns:repeat(auto-fill,minmax(216px,1fr)); gap:14px; margin-top:6px;}
   .tile{display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line);
@@ -184,19 +214,38 @@
   <!-- ══════════ 範本列表 ══════════ -->
   <section id="galleryView">
     <header class="page">
-      <p class="eyebrow">圖表範本庫</p>
-      <h1>公務用圖表範本庫</h1>
+      <p class="eyebrow">公務用圖表工具</p>
+      <h1>公務用圖表工具</h1>
       <p class="source">圖表範本取自
         <a href="https://github.com/cathrynlavery/diagram-design" target="_blank" rel="noopener noreferrer">github.com/cathrynlavery/diagram-design</a>
         ・MIT License・Cathryn Lavery</p>
-      <p class="lede">流程圖、泳道圖、組織圖這種在 Word 裡拉半天還是對不齊的圖，
-        這裡是<strong>已經排好的</strong>。挑一張、把字改成你的案子、下載貼進簽稿或簡報——
-        不必開 Visio，也不必自己對齊框線。（長條圖、折線圖 Excel 兩下就有，這裡不必用。）</p>
+      <p class="lede">流程圖、甘特圖這種在 Word 裡拉半天還是對不齊的圖，
+        這裡是<strong>填表格產生的</strong>。有幾個步驟、哪裡分岔、哪一項做到幾號，你填；
+        方塊多大、線怎麼連、長條畫多長，程式算。下載貼進簽稿或簡報，不必開 Visio。
+        （長條圖、折線圖 Excel 兩下就有，這裡不必用。）</p>
       <p class="privacy">全程在你的瀏覽器裡完成，沒有上傳、沒有後端，資料不離開這台裝置</p>
     </header>
 
     <div class="card">
-      <h2>能改什麼、不能改什麼</h2>
+      <h2>你要做哪一種圖？</h2>
+      <p class="hint">點下去進到填表畫面，把自己的內容填進去就有圖。
+        下面的縮圖是<strong>照範例內容真的畫出來的</strong>，不是照片——填完你的內容，
+        得到的就是同一種樣子。</p>
+      <div class="makes" id="makes"></div>
+      <p class="hint" style="margin-top:14px">還沒有你要的那一種？下面還有 153 張排好版的範本可以挑，
+        那些只能換字、不能加減方塊。</p>
+    </div>
+
+    <div class="card">
+      <h2>填表產生 vs. 挑現成範本</h2>
+      <p class="hint"><strong>填表產生（上面五種）：</strong>你決定有幾列、每一列寫什麼、哪裡分岔、
+        日期是幾號；版面由程式算。適合「形狀對不上任何現成範本」——大部分時候都是這樣。</p>
+      <p class="hint"><strong>挑現成範本（下面 153 張）：</strong>方塊的位置與大小是畫死的，
+        你只能換掉上面的字。適合「剛好有一張長得跟你要的一樣」。</p>
+    </div>
+
+    <div class="card">
+      <h2>範本能改什麼、不能改什麼</h2>
       <p class="hint"><strong>能改的：</strong>圖上每一段文字、標題、四個主要顏色。
         <strong>不能改的：</strong>方塊的位置與大小——那是範本畫死的。
         中文比英文寬，字太長時本站會自動縮小字級塞進框裡，縮到看不清楚就代表該把字改短。</p>
@@ -208,16 +257,10 @@
     </div>
 
     <div class="card">
-      <h2>先從這幾張開始</h2>
-      <p class="hint">最常被要求、又最難自己排的七種。點下去就是排好的中文圖，改成你的案子即可。</p>
+      <h2>從 153 張範本裡挑</h2>
+      <p class="hint">最常被要求的幾種先擺在前面，點下去就是排好的中文圖，改成你的案子即可。</p>
       <div class="starters" id="starters"></div>
-      <p class="hint" style="margin-top:14px"><strong>步驟數不一樣、分岔不一樣？</strong>
-        範本只能換字，不能加減方塊。要自己決定有幾個步驟、幾個判斷、往哪裡分岔，
-        用 <a href="#/flow">流程圖產生器</a>——打大綱，版面由程式排。</p>
-    </div>
-
-    <div class="card">
-      <h2>或是從 153 張裡挑</h2>
+      <div style="margin-top:20px"></div>
       <div class="grid c3">
         <div>
           <label class="fl" for="q">搜尋（中文名、用途、英文標題都可以）</label>
@@ -250,31 +293,36 @@
 
   <!-- ══════════ 改字 ══════════ -->
   <section id="editorView" hidden>
-    <p style="margin:18px 0 0"><a href="#/" id="backLink">← 回範本列表</a></p>
+    <p style="margin:18px 0 0"><a href="#/" id="backLink">← 回首頁</a></p>
     <header class="page">
       <p class="eyebrow" id="edKind"></p>
       <h1 id="edHeading"></h1>
       <p class="lede" id="edUse"></p>
     </header>
 
-    <div class="card" id="flowCard" hidden>
-      <h2>流程大綱</h2>
-      <p class="hint">一行一個節點，<strong>由上往下就是流程的順序</strong>。三件事要記：</p>
-      <ul class="hint syntax">
-        <li>開頭寫 <code>開始</code> 或 <code>結束</code> 是橢圓、<code>判斷</code> 是菱形，其餘一律是矩形步驟。</li>
-        <li>斜線後面是小字副標：<code>步驟 登記收文 / 收發室</code>。</li>
-        <li>判斷底下<strong>縮排一行</strong>就是分支：<code>否 → 移文他科</code>（往右接一個結果）、
-          <code>是 ↑ 承辦人擬稿</code>（退回前面某一步，文字要一模一樣）。
-          打不出箭頭時 <code>-&gt;</code> 和 <code>^</code> 也可以。</li>
-      </ul>
-      <p class="hint">你只要標一條分支，往下走的那一條會自動標上相反的那個（是↔否）。</p>
-      <label class="sr-only" for="flowText">流程大綱</label>
-      <textarea id="flowText" rows="12" spellcheck="false"></textarea>
-      <p class="hint" id="flowCount" role="status" aria-live="polite"></p>
-      <p class="errbox" id="flowErr" role="alert"></p>
-      <div class="row">
-        <button type="button" id="flowResetBtn">放回範例</button>
+    <div class="card" id="makeCard" hidden>
+      <h2 id="makeTitle">填內容</h2>
+      <p class="hint" id="makeRowsLabel"></p>
+      <ul class="hint syntax" id="makeHelp"></ul>
+
+      <div id="makeMetaWrap" hidden>
+        <div class="mrow">
+          <div class="fno"></div>
+          <div class="ffields" id="makeMeta"></div>
+        </div>
       </div>
+
+      <div id="makeRows"></div>
+
+      <div class="row">
+        <button type="button" class="primary" id="makeAddBtn">＋ 加一列</button>
+        <button type="button" id="makeExampleBtn">填入範例</button>
+        <button type="button" id="makeClearBtn">全部清空</button>
+      </div>
+      <p class="hint" id="makeCount" role="status" aria-live="polite"></p>
+      <p class="errbox" id="makeErr" role="alert"></p>
+      <p class="hint"><a href="#/" id="makeSample">看一張排好的範本</a>
+        ——想知道「這種圖長什麼樣子」的時候看，不必照它填。</p>
     </div>
 
     <div class="card">
@@ -352,14 +400,16 @@
       </div>
       <p class="hint">最省事的是「複製圖片到剪貼簿」：按完直接到 Word 或簡報按 Ctrl+V，
         不必先存檔再插入圖片。</p>
-      <div class="row">
-        <button type="button" id="saveProjBtn">存出設定檔</button>
-        <label class="filebtn" for="loadProjInput">載入設定檔
-          <input type="file" id="loadProjInput" accept=".json,application/json"></label>
-        <button type="button" id="resetBtn">全部復原</button>
+      <div id="projBox">
+        <div class="row">
+          <button type="button" id="saveProjBtn">存出設定檔</button>
+          <label class="filebtn" for="loadProjInput">載入設定檔
+            <input type="file" id="loadProjInput" accept=".json,application/json"></label>
+          <button type="button" id="resetBtn">全部復原</button>
+        </div>
+        <p class="hint">改到一半可以「存出設定檔」（一個小小的 .json），下次在同一張範本按「載入設定檔」
+          就接著改，也可以傳給同事接手。設定檔只記你改了什麼，不含圖檔本身。</p>
       </div>
-      <p class="hint">改到一半可以「存出設定檔」（一個小小的 .json），下次在同一張範本按「載入設定檔」
-        就接著改，也可以傳給同事接手。設定檔只記你改了什麼，不含圖檔本身。</p>
       <p class="okbox" id="edOk" role="status" aria-live="polite"></p>
       <p class="errbox" id="dlErr" role="alert"></p>
       <p class="hint" id="pngNote" hidden></p>
@@ -375,7 +425,8 @@
 <noscript><p style="padding:18px">這個工具需要 JavaScript 才能運作，所有運算都在你自己的瀏覽器裡跑，沒有伺服器。</p></noscript>
 <script src="app/core.js"></script>
 <script src="app/editor.js"></script>
-<script src="app/flow.js"></script>
+<script src="app/gen.js"></script>
+<script src="app/forms.js"></script>
 <script src="app/app.js"></script>
 </body>
 </html>

@@ -23,7 +23,7 @@
     ['stage', 'edKind', 'edHeading', 'edUse', 'edEyebrow', 'edTitleIn', 'paletteSel', 'scaleSel',
       'fontSel', 'fitChk', 'zhChk', 'zhRow', 'zhNote', 'textList', 'textCount',
       'pasteBox', 'pasteBtn', 'pasteErr', 'copyPngBtn', 'saveProjBtn', 'loadProjInput', 'textCard',
-      'dlPng', 'dlSvg', 'dlHtml', 'resetBtn', 'edErr', 'edOk', 'dlErr', 'pngNote', 'swatches']
+      'dlPng', 'dlSvg', 'dlHtml', 'resetBtn', 'projBox', 'edErr', 'edOk', 'dlErr', 'pngNote', 'swatches']
       .forEach(function (id) { el[id] = $(id); });
   }
 
@@ -497,8 +497,9 @@
   }
 
   /**
-   * opts.flow    產生器模式：大綱是唯一真相，所以把逐段改字的清單藏起來
-   * opts.keepTitle 不要覆蓋使用者已經打好的標題（產生器每打一個字就重開一次）
+   * opts.flow       產生器模式：表單是唯一真相，所以把逐段改字的清單藏起來
+   * opts.keepTitle  不要覆蓋使用者已經打好的標題（產生器每打一個字就重開一次）
+   * opts.genHeading／opts.genUse  產生器模式的標題與說明，由產生器自己給
    */
   function open(diagram, opts) {
     var o = opts || {};
@@ -530,14 +531,15 @@
 
     state.flow = !!o.flow;
     el.textCard.hidden = state.flow;
-    if (state.flow) el.zhRow.hidden = true;
+    /* 產生器畫出來的圖本來就是中文，沒有「中文層」可言——那段說明留著只會讓人以為壞了 */
+    if (state.flow) { el.zhRow.hidden = true; el.zhNote.textContent = ''; }
 
     el.edKind.textContent = diagram.typeZh + '　' + diagram.variantZh;
     el.edHeading.textContent = state.flow
-      ? '自己排一張流程圖'
+      ? (o.genHeading || '自己做一張圖')
       : (diagram.heading || diagram.title || diagram.typeZh);
     el.edUse.textContent = state.flow
-      ? '打大綱，方塊大小、位置與連線由程式排。步驟幾個、判斷幾個、往哪裡分岔都由你決定。'
+      ? (o.genUse || '版面由程式排，你只要把內容填對。')
       : (diagram.use || '');
     if (!o.keepTitle) {
       el.edEyebrow.value = (state.zhOn && diagram.zhEyebrow) || diagram.typeZh;
@@ -553,9 +555,11 @@
 
     el.dlPng.disabled = !diagram.png;
     el.copyPngBtn.disabled = !diagram.png;
-    /* 設定檔記的是「第幾段改成什麼」，產生器的真相是大綱，兩者對不起來，所以停用 */
+    /* 設定檔記的是「第幾段改成什麼」，產生器的真相是表單，兩者對不起來。
+       停用還不夠——長得像可以按的按鈕按下去沒反應更氣人，整塊藏掉。 */
     el.saveProjBtn.disabled = state.flow;
     el.loadProjInput.disabled = state.flow;
+    el.projBox.hidden = state.flow;
     el.pngNote.hidden = !!diagram.png;
     if (!diagram.png) {
       el.pngNote.textContent = '這張範本用到了 SVG 的 foreignObject，瀏覽器不會把它畫進 PNG 裡，' +

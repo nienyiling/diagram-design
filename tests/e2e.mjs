@@ -40,8 +40,8 @@ await page.goto(server.url, { waitUntil: 'networkidle' });
 /* ── 首頁 ────────────────────────────────────────────────────────── */
 
 await t('首頁打得開，標題是中文的', async () => {
-  assert.equal(await page.title(), '公務用圖表範本庫');
-  assert.equal(await page.locator('h1').first().innerText(), '公務用圖表範本庫');
+  assert.equal(await page.title(), '公務用圖表工具');
+  assert.equal(await page.locator('h1').first().innerText(), '公務用圖表工具');
 });
 
 await t('頂欄有回工具箱的路', async () => {
@@ -66,12 +66,19 @@ await t('隱私承諾寫在首頁上', async () => {
   assert.ok((await page.locator('.privacy').innerText()).includes('資料不離開這台裝置'));
 });
 
-await t('首頁最上面就是快捷入口，第一顆是「自己排一張」', async () => {
+await t('首頁最上面就是五個「自己做一張」的入口，縮圖是產生器自己畫的', async () => {
+  const makes = page.locator('.make');
+  assert.equal(await makes.count(), 5, '五種產生器');
+  assert.equal(await makes.first().getAttribute('href'), '#/make/flow');
+  assert.ok((await makes.first().innerText()).includes('流程圖'));
+  /* 縮圖不是圖片檔也不是範本，是產生器當場畫出來的 SVG */
+  assert.equal(await page.locator('.make .shot svg').count(), 5);
+});
+
+await t('範本的快捷入口還在，只是退到範本區裡', async () => {
   const starters = page.locator('.starter');
-  assert.equal(await starters.count(), 8, '一顆產生器＋七張範本');
-  assert.equal(await starters.first().getAttribute('href'), '#/flow');
-  assert.ok((await starters.first().innerText()).includes('自己排一張'));
-  assert.equal(await starters.nth(1).getAttribute('href'), '#/example-flowchart');
+  assert.equal(await starters.count(), 7, '七張範本');
+  assert.equal(await starters.first().getAttribute('href'), '#/example-flowchart');
 });
 
 await t('預設只給 Excel 做不到的那種圖：長條圖、折線圖不在預設視野裡', async () => {
@@ -504,56 +511,149 @@ await t('不能轉 PNG 的範本，複製按鈕也一起停用', async () => {
   assert.equal(await page.locator('#copyPngBtn').isDisabled(), true);
 });
 
-/* ── 流程圖產生器：這是「範本只能換字」的解法 ───────────────────────── */
+/* ── 五種產生器：這是「範本只能換字」的解法 ─────────────────────────── */
 
-await t('產生器打得開，一進去就有一份公文流程的範例', async () => {
+await t('五種產生器都打得開，一進去就有一份公務情境的範例', async () => {
+  for (const [id, name, word] of [
+    ['flow', '流程圖', '收到來文'],
+    ['gantt', '甘特圖', '各科室需求訪談'],
+    ['timeline', '時間軸', '修正草案預告'],
+    ['layers', '分層堆疊圖', '受理與分辦'],
+    ['quadrant', '四象限圖', '線上申辦改版']
+  ]) {
+    await page.goto(server.url + '#/make/' + id, { waitUntil: 'networkidle' });
+    await page.locator('#stage svg').waitFor({ timeout: 5000 });
+    assert.equal(await page.locator('#makeCard').isVisible(), true, id + ' 的表單沒出現');
+    assert.ok((await page.locator('#makeTitle').innerText()).includes(name), id);
+    const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+    assert.ok(svgText.includes(word), id + ' 的圖上找不到「' + word + '」');
+  }
+});
+
+await t('舊網址 #/flow 轉到新的流程圖產生器', async () => {
   await page.goto(server.url + '#/flow', { waitUntil: 'networkidle' });
   await page.locator('#stage svg').waitFor({ timeout: 5000 });
-  assert.equal(await page.locator('#flowCard').isVisible(), true);
-  const outline = await page.locator('#flowText').inputValue();
-  assert.ok(outline.includes('判斷'), outline.slice(0, 60));
-  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
-  assert.ok(svgText.includes('收到來文') && svgText.includes('發文並歸檔'), svgText.slice(0, 120));
+  assert.equal(new URL(page.url()).hash, '#/make/flow');
 });
 
-await t('產生器不給逐段改字（大綱是唯一真相）', async () => {
+await t('產生器不給逐段改字，也不給設定檔（表單是唯一真相）', async () => {
   assert.equal(await page.locator('#textCard').isVisible(), false);
   assert.equal(await page.locator('#zhRow').isVisible(), false);
-  assert.equal(await page.locator('#saveProjBtn').isDisabled(), true);
+  assert.equal(await page.locator('#projBox').isVisible(), false);
 });
 
-await t('自己加一個步驟，圖上就多一個方塊', async () => {
-  const before = await page.evaluate(() => document.querySelectorAll('#stage svg rect').length);
-  await page.locator('#flowText').fill(
-    '開始 收到申請\n步驟 初審\n步驟 實地查核\n判斷 是否符合資格？\n  否 → 駁回並函復\n步驟 核定\n結束 發函');
+await t('改一格字，圖就跟著改', async () => {
+  await page.goto(server.url + '#/make/flow', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  await page.locator('#f_flow_1_main').fill('登記並掃描');
   await page.waitForTimeout(500);
-  const after = await page.evaluate(() => document.querySelectorAll('#stage svg rect').length);
-  assert.notEqual(before, after, '改了大綱，圖沒有跟著變');
   const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
-  ['收到申請', '初審', '實地查核', '是否符合資格？', '駁回並函復', '核定', '發函']
-    .forEach((w) => assert.ok(svgText.includes(w), '圖上少了「' + w + '」'));
-  /* 六個主節點；縮排那行是分支，不另外算一個節點 */
-  assert.ok((await page.locator('#flowCount').innerText()).includes('6 個節點'),
-    await page.locator('#flowCount').innerText());
+  assert.ok(svgText.includes('登記並掃描'), svgText.slice(0, 200));
+  assert.ok(!svgText.includes('登記收文'));
 });
 
-await t('退回目標打錯字時，錯誤訊息是看得見的，而且說得出哪一行', async () => {
-  await page.locator('#flowText').fill('步驟 承辦人擬稿\n判斷 要修正嗎？\n  是 ↑ 打錯的名字');
+await t('按「加一列」就多一個方塊，而且游標會落在新的那一列', async () => {
+  const before = await page.locator('.frow').count();
+  await page.locator('#makeAddBtn').click();
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator('.frow').count(), before + 1);
+  const focused = await page.evaluate(() => document.activeElement.id);
+  assert.ok(focused.startsWith('f_flow_' + before + '_'), focused);
+  await page.locator('#f_flow_' + before + '_main').fill('後續追蹤');
   await page.waitForTimeout(500);
-  assert.equal(await page.locator('#flowErr').isVisible(), true);
-  const msg = await page.locator('#flowErr').innerText();
-  assert.ok(msg.includes('第 3 行'), msg);
-  assert.ok(msg.includes('打錯的名字'), msg);
+  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(svgText.includes('後續追蹤'), svgText.slice(0, 200));
 });
 
-await t('「放回範例」把大綱還原', async () => {
-  await page.locator('#flowResetBtn').click();
+await t('刪掉那一列，圖上就沒有了', async () => {
+  const rows = await page.locator('.frow').count();
+  await page.locator('.frow').last().locator('button', { hasText: '✕' }).click();
   await page.waitForTimeout(500);
-  assert.ok((await page.locator('#flowText').inputValue()).includes('收到來文'));
-  assert.equal(await page.locator('#flowErr').isVisible(), false);
+  assert.equal(await page.locator('.frow').count(), rows - 1);
+  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(!svgText.includes('後續追蹤'));
 });
 
-await t('自己排的圖一樣能換配色、換字體', async () => {
+await t('上移下移換得動順序', async () => {
+  await page.locator('#makeExampleBtn').click();
+  await page.waitForTimeout(400);
+  const first = await page.locator('#f_flow_0_main').inputValue();
+  const second = await page.locator('#f_flow_1_main').inputValue();
+  await page.locator('.frow').nth(1).locator('button[aria-label^="上移"]').click();
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator('#f_flow_0_main').inputValue(), second);
+  assert.equal(await page.locator('#f_flow_1_main').inputValue(), first);
+});
+
+await t('第一列不能再上移、最後一列不能再下移', async () => {
+  assert.equal(await page.locator('.frow').first()
+    .locator('button[aria-label^="上移"]').isDisabled(), true);
+  assert.equal(await page.locator('.frow').last()
+    .locator('button[aria-label^="下移"]').isDisabled(), true);
+});
+
+await t('型別改成「判斷」才長出分岔的欄位', async () => {
+  await page.locator('#makeExampleBtn').click();
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator('#f_flow_1_branchText').count(), 0, '步驟不該有分支欄位');
+  await page.locator('#f_flow_1_kind').selectOption('decision');
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator('#f_flow_1_branchText').count(), 1, '判斷該有分支欄位');
+  assert.equal(await page.locator('#f_flow_1_loopTo').count(), 1);
+});
+
+await t('「退回到」的選項只有前面那幾列', async () => {
+  await page.locator('#makeExampleBtn').click();
+  await page.waitForTimeout(400);
+  const opts = await page.locator('#f_flow_5_loopTo option').allInnerTexts();
+  assert.ok(opts.includes('承辦人擬稿'), opts.join('／'));
+  assert.ok(!opts.includes('主管決行'), '後面的步驟不該出現在退回目標裡：' + opts.join('／'));
+});
+
+await t('日期打錯時，錯誤訊息是看得見的，而且說得出是哪一項', async () => {
+  await page.goto(server.url + '#/make/gantt', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  await page.locator('#f_gantt_0_start').fill('三月初');
+  await page.waitForTimeout(500);
+  assert.equal(await page.locator('#makeErr').isVisible(), true, '錯誤訊息沒有顯示出來');
+  const msg = await page.locator('#makeErr').innerText();
+  assert.ok(msg.includes('各科室需求訪談'), msg);
+  assert.ok(msg.includes('三月初'), msg);
+});
+
+await t('「填入範例」把整份還原', async () => {
+  await page.locator('#makeExampleBtn').click();
+  await page.waitForTimeout(500);
+  assert.equal(await page.locator('#f_gantt_0_start').inputValue(), '114/3/3');
+  assert.equal(await page.locator('#makeErr').isVisible(), false);
+});
+
+await t('「全部清空」留一列空的，並且講得出下一步', async () => {
+  await page.locator('#makeClearBtn').click();
+  await page.waitForTimeout(500);
+  assert.equal(await page.locator('.frow').count(), 1);
+  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(svgText.includes('左邊'), svgText);
+  await page.locator('#makeExampleBtn').click();
+  await page.waitForTimeout(400);
+});
+
+await t('整張圖共用的設定（軸名）改得動', async () => {
+  await page.goto(server.url + '#/make/quadrant', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  await page.locator('#m_quadrant_xLabel').fill('急迫程度');
+  await page.waitForTimeout(500);
+  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(svgText.includes('急迫程度'), svgText.slice(0, 200));
+});
+
+await t('沒有共用設定的那幾種，那一塊就不出現', async () => {
+  await page.goto(server.url + '#/make/flow', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  assert.equal(await page.locator('#makeMetaWrap').isVisible(), false);
+});
+
+await t('自己做的圖一樣能換配色、換字體', async () => {
   await page.locator('#paletteSel').selectOption('gongwu');
   await page.waitForTimeout(400);
   const fill = await page.evaluate(() =>
@@ -569,7 +669,7 @@ await t('自己排的圖一樣能換配色、換字體', async () => {
   await page.waitForTimeout(300);
 });
 
-await t('自己排的圖下載得出來，而且一樣帶著來源標註', async () => {
+await t('自己做的圖下載得出來，而且一樣帶著來源標註', async () => {
   await page.locator('#edTitleIn').fill('本府案件審查流程');
   await page.waitForTimeout(400);
   const [download] = await Promise.all([
@@ -582,13 +682,24 @@ await t('自己排的圖下載得出來，而且一樣帶著來源標註', async
   assert.ok(text.includes('cathrynlavery/diagram-design'));
 });
 
-await t('從產生器回列表，大綱卡就收起來', async () => {
+await t('每一格都有自己的標籤（不是靠位置猜的）', async () => {
+  const n = await page.locator('.frow .fcell').evaluateAll((cells) =>
+    cells.filter((c) => {
+      const label = c.querySelector('label[for]');
+      const input = c.querySelector('input, select');
+      return !label || !input || label.getAttribute('for') !== input.id;
+    }).length);
+  assert.equal(n, 0, '有 ' + n + ' 格沒有對得上的標籤');
+});
+
+await t('從產生器回首頁，表單卡就收起來', async () => {
   await page.goto(server.url, { waitUntil: 'networkidle' });
-  assert.equal(await page.locator('#flowCard').isVisible(), false);
+  assert.equal(await page.locator('#makeCard').isVisible(), false);
   await page.goto(server.url + '#/example-flowchart', { waitUntil: 'networkidle' });
   await page.locator('#stage svg').waitFor({ timeout: 5000 });
-  assert.equal(await page.locator('#flowCard').isVisible(), false);
+  assert.equal(await page.locator('#makeCard').isVisible(), false);
   assert.equal(await page.locator('#textCard').isVisible(), true, '範本模式要看得到文字清單');
+  assert.equal(await page.locator('#projBox').isVisible(), true, '範本模式要看得到設定檔');
 });
 
 /* ── 每一張圖都要畫得出來 ──────────────────────────────────────────── */

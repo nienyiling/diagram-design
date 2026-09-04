@@ -89,6 +89,8 @@ jobs:
             dist/app/core.js \
             dist/app/app.js \
             dist/app/editor.js \
+            dist/app/gen.js \
+            dist/app/forms.js \
             dist/data/diagrams.json
           do
             [ -f "$f" ] || missing="$missing $f"

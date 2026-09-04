@@ -13,6 +13,7 @@
   'use strict';
 
   var DD = window.DD;
+  var GEN = window.DDGen;
   var data = null;
   var byId = {};
   var observer = null;
@@ -37,6 +38,7 @@
       .then(function (json) {
         data = json;
         json.diagrams.forEach(function (d) { byId[d.id] = d; });
+        fillMakes();
         fillStarters();
         fillTypes();
         bind();
@@ -53,12 +55,10 @@
   function fillStarters() {
     var box = $('starters');
     box.innerHTML = '';
-    [{ id: 'flow', label: '自己排一張', note: '打大綱，步驟與分岔自己決定' }]
-      .concat(DD.STARTERS).forEach(function (st) {
-      var d = st.id === 'flow' ? true : byId[st.id];
-      if (!d) return;
+    DD.STARTERS.forEach(function (st) {
+      if (!byId[st.id]) return;
       var a = document.createElement('a');
-      a.className = 'starter' + (st.id === 'flow' ? ' make' : '');
+      a.className = 'starter';
       a.href = '#/' + st.id;
       var b = document.createElement('b');
       b.textContent = st.label;
@@ -66,6 +66,54 @@
       note.textContent = st.note;
       a.appendChild(b);
       a.appendChild(note);
+      box.appendChild(a);
+    });
+  }
+
+  /* 做圖入口的縮圖＝產生器拿自己的 example 真的畫一張。
+     用範本當縮圖會騙人：使用者看到的是別人排的形狀，填完卻拿到另一種東西。 */
+  function fillMakes() {
+    var box = $('makes');
+    box.innerHTML = '';
+    GEN.TYPES.forEach(function (gen) {
+      var a = document.createElement('a');
+      a.className = 'make';
+      a.href = '#/make/' + gen.id;
+      a.setAttribute('aria-label', '做一張' + gen.name + '：' + gen.use);
+
+      var shot = document.createElement('div');
+      shot.className = 'shot';
+      try {
+        var meta = (gen.meta || []).reduce(function (m, f) { m[f.key] = f.placeholder || ''; return m; }, {});
+        shot.innerHTML = gen.build(gen.example, meta, { title: gen.sampleTitle }).svg;
+        var svg = shot.querySelector('svg');
+        if (svg) {
+          svg.removeAttribute('width');
+          svg.removeAttribute('height');
+          svg.setAttribute('aria-hidden', 'true');
+          svg.setAttribute('focusable', 'false');
+        }
+      } catch (e) {
+        shot.textContent = gen.name;
+      }
+
+      var meta2 = document.createElement('div');
+      meta2.className = 'meta';
+      var t1 = document.createElement('div');
+      t1.className = 't1';
+      t1.textContent = gen.name;
+      var go = document.createElement('span');
+      go.className = 'go';
+      go.textContent = '填表產生 →';
+      t1.appendChild(go);
+      var t2 = document.createElement('div');
+      t2.className = 't2';
+      t2.textContent = gen.use;
+      meta2.appendChild(t1);
+      meta2.appendChild(t2);
+
+      a.appendChild(shot);
+      a.appendChild(meta2);
       box.appendChild(a);
     });
   }
@@ -195,16 +243,20 @@
     var gallery = $('galleryView');
     var editor = $('editorView');
 
-    if (id === 'flow') {
+    /* 舊網址 #/flow 是流程圖產生器，還在外面流傳，轉到新的位置 */
+    if (id === 'flow') { location.replace('#/make/flow'); return; }
+
+    var make = /^make\/(.+)$/.exec(id);
+    if (make && GEN.byId(make[1])) {
       if (!gallery.hidden) lastScroll = window.scrollY;
       gallery.hidden = true;
       editor.hidden = false;
       window.scrollTo(0, 0);
-      document.title = '流程圖產生器 — 公務用圖表範本庫';
-      window.DDFlow.open();
+      document.title = GEN.byId(make[1]).name + '產生器 — 公務用圖表工具';
+      window.DDForms.open(make[1]);
       return;
     }
-    window.DDFlow.close();
+    window.DDForms.close();
 
     if (id && byId[id]) {
       if (!gallery.hidden) lastScroll = window.scrollY;
@@ -219,7 +271,7 @@
 
     editor.hidden = true;
     gallery.hidden = false;
-    document.title = '公務用圖表範本庫';
+    document.title = '公務用圖表工具';
     if (!data) return;
     if (!$('tiles').children.length) renderTiles();
     window.scrollTo(0, lastScroll);
@@ -232,7 +284,7 @@
       node.addEventListener('change', renderTiles);
     });
     window.DDEditor.bind();
-    window.DDFlow.init();
+    window.DDForms.init();
     window.addEventListener('hashchange', route);
   }
 
