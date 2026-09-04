@@ -22,7 +22,7 @@
   function cacheEls() {
     ['stage', 'edKind', 'edHeading', 'edUse', 'edEyebrow', 'edTitleIn', 'paletteSel', 'scaleSel',
       'fontSel', 'fitChk', 'zhChk', 'zhRow', 'zhNote', 'textList', 'textCount',
-      'pasteBox', 'pasteBtn', 'pasteErr', 'copyPngBtn', 'saveProjBtn', 'loadProjInput',
+      'pasteBox', 'pasteBtn', 'pasteErr', 'copyPngBtn', 'saveProjBtn', 'loadProjInput', 'textCard',
       'dlPng', 'dlSvg', 'dlHtml', 'resetBtn', 'edErr', 'edOk', 'dlErr', 'pngNote', 'swatches']
       .forEach(function (id) { el[id] = $(id); });
   }
@@ -181,6 +181,7 @@
   }
 
   function selectUnit(idx, focusField) {
+    if (state.flow) return;
     state.selected = idx;
     Array.prototype.forEach.call(el.textList.children, function (row, i) {
       row.classList.toggle('on', i === idx);
@@ -196,6 +197,7 @@
   /* ── 文字清單 ────────────────────────────────────────────────────── */
 
   function buildTextList() {
+    if (state.flow) return;
     el.textList.innerHTML = '';
     var frag = document.createDocumentFragment();
     state.orig.forEach(function (o, i) {
@@ -494,7 +496,12 @@
     });
   }
 
-  function open(diagram) {
+  /**
+   * opts.flow    產生器模式：大綱是唯一真相，所以把逐段改字的清單藏起來
+   * opts.keepTitle 不要覆蓋使用者已經打好的標題（產生器每打一個字就重開一次）
+   */
+  function open(diagram, opts) {
+    var o = opts || {};
     cacheEls();
     fillPalettes();
     var hasZh = DD.hasTranslation(diagram.zh);
@@ -521,21 +528,34 @@
       : '這張只換得掉圖例、月份、是／否這類固定用字（' + diagram.zhCount + '／' + diagram.segs +
         ' 段）；方塊裡的內容是範本自帶的示範資料，本來就要整段換掉。';
 
+    state.flow = !!o.flow;
+    el.textCard.hidden = state.flow;
+    if (state.flow) el.zhRow.hidden = true;
+
     el.edKind.textContent = diagram.typeZh + '　' + diagram.variantZh;
-    el.edHeading.textContent = diagram.heading || diagram.title || diagram.typeZh;
-    el.edUse.textContent = diagram.use || '';
-    el.edEyebrow.value = (state.zhOn && diagram.zhEyebrow) || diagram.typeZh;
-    el.edTitleIn.value = state.zhOn ? (diagram.zhHeading || '') : '';
+    el.edHeading.textContent = state.flow
+      ? '自己排一張流程圖'
+      : (diagram.heading || diagram.title || diagram.typeZh);
+    el.edUse.textContent = state.flow
+      ? '打大綱，方塊大小、位置與連線由程式排。步驟幾個、判斷幾個、往哪裡分岔都由你決定。'
+      : (diagram.use || '');
+    if (!o.keepTitle) {
+      el.edEyebrow.value = (state.zhOn && diagram.zhEyebrow) || diagram.typeZh;
+      el.edTitleIn.value = state.zhOn ? (diagram.zhHeading || '') : '';
+    }
     show(el.edErr, '');
     show(el.edOk, '');
     show(el.dlErr, '');
 
     render();
-    buildTextList();
+    if (!state.flow) buildTextList();
     renderSwatches();
 
     el.dlPng.disabled = !diagram.png;
     el.copyPngBtn.disabled = !diagram.png;
+    /* 設定檔記的是「第幾段改成什麼」，產生器的真相是大綱，兩者對不起來，所以停用 */
+    el.saveProjBtn.disabled = state.flow;
+    el.loadProjInput.disabled = state.flow;
     el.pngNote.hidden = !!diagram.png;
     if (!diagram.png) {
       el.pngNote.textContent = '這張範本用到了 SVG 的 foreignObject，瀏覽器不會把它畫進 PNG 裡，' +

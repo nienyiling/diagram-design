@@ -24,6 +24,7 @@
   UMD 包法，瀏覽器掛 `window.DD`，Node `require` 同一份。零相依。
 - `app/app.js`：載 `data/diagrams.json`、畫範本列表、hash 路由（`#/` 列表、`#/範本id` 改字）。
 - `app/editor.js`：改字畫面。掛 `window.DDEditor`。
+- `app/flow.js`：流程圖產生器的畫面層。掛 `window.DDFlow`。
 - `scripts/build-data.mjs`：`vendor/upstream/*.html` ＋ `content/zh-samples.json` → `data/diagrams.json`。
 - `content/zh-samples.json`：人工寫的公務情境中文範例，一張圖一筆，`texts` 依序號對應圖上每一段。
   用 `node scripts/dump-segments.mjs <範本id>` 查序號。**只在建置時用，不部署。**
@@ -88,6 +89,25 @@
 畫面上的優先序：**使用者自己改的 → 中文層（開關打開時）→ 範本原文**，
 三者共用 `effectiveText(i)`，畫面、文字清單、下載才不會各說各話。
 
+## 流程圖產生器：範本庫最大限制的解法
+
+範本庫只能換掉別人排好的字——**方塊是畫死的**，使用者的流程有五步而範本畫四步就沒轍。
+這是這個站最容易被使用者一眼看穿的限制，所以另外做了產生器（`#/flow`）：
+使用者打大綱，`core.js` 的 `parseFlow()`／`layoutFlow()`／`renderFlowSvg()` 算出整張 SVG。
+
+- **三個函式都是純函式**，版面算錯時測得出來是哪一格（`layoutFlow` 回傳每一格的 top／bottom／h）。
+- **產出的 SVG 用上游那四個色票的字面值**（`#f5f5f5`／`#2d3142`／`#4f5d75`／`#eb6c36`），
+  換配色與換字體那兩條路才吃得到它。改成別的顏色會讓自己排的圖換不了色。
+- **使用者打的字一律 `escapeXml`**——那是使用者輸入，直接進 SVG 會變成標籤。
+- **產生器把「逐段改字」的清單藏起來**（`opts.flow`）。大綱是唯一真相；
+  兩個地方都能改字的話，使用者改完大綱會發現剛才在下面改的字被蓋掉，那更難用。
+  設定檔（記「第幾段改成什麼」）對產生器沒有意義，一併停用。
+- **產生器把整張圖當成一張「臨時的範本」交給 `DDEditor.open()`**，
+  預覽、換配色、換字體、下載、複製剪貼簿整套沿用，不要再寫一遍。
+  每打一個字就重開一次，所以 `open()` 有 `opts.keepTitle`，不然標題會被洗掉。
+- **看不懂的行一律回報**（`parsed.warnings`），顯示在看得見的 `.errbox` 裡，
+  而且要講得出「第 N 行」與使用者實際打了什麼。靜靜少畫一塊比報錯更難查。
+
 ## 產品取捨：焦點是「Excel 做不到的圖」
 
 使用者的痛點是**流程圖超難做**；長條圖、折線圖、圓餅圖 Excel 兩下就有。
@@ -126,7 +146,7 @@
 
 | 指令 | 內容 |
 |---|---|
-| `npm test` | 全部：`core.unit`（132）＋`data`（25）＋`e2e`（57），約 2 分鐘 |
+| `npm test` | 全部：`core.unit`（156）＋`data`（25）＋`e2e`（65），約 2 分鐘 |
 | `npm run test:unit` | 純函式＋資料一致性，約 3 秒 |
 | `npm run test:e2e` | 只跑瀏覽器實測 |
 

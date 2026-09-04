@@ -53,11 +53,12 @@
   function fillStarters() {
     var box = $('starters');
     box.innerHTML = '';
-    DD.STARTERS.forEach(function (st) {
-      var d = byId[st.id];
+    [{ id: 'flow', label: '自己排一張', note: '打大綱，步驟與分岔自己決定' }]
+      .concat(DD.STARTERS).forEach(function (st) {
+      var d = st.id === 'flow' ? true : byId[st.id];
       if (!d) return;
       var a = document.createElement('a');
-      a.className = 'starter';
+      a.className = 'starter' + (st.id === 'flow' ? ' make' : '');
       a.href = '#/' + st.id;
       var b = document.createElement('b');
       b.textContent = st.label;
@@ -194,6 +195,17 @@
     var gallery = $('galleryView');
     var editor = $('editorView');
 
+    if (id === 'flow') {
+      if (!gallery.hidden) lastScroll = window.scrollY;
+      gallery.hidden = true;
+      editor.hidden = false;
+      window.scrollTo(0, 0);
+      document.title = '流程圖產生器 — 公務用圖表範本庫';
+      window.DDFlow.open();
+      return;
+    }
+    window.DDFlow.close();
+
     if (id && byId[id]) {
       if (!gallery.hidden) lastScroll = window.scrollY;
       gallery.hidden = true;
@@ -220,6 +232,7 @@
       node.addEventListener('change', renderTiles);
     });
     window.DDEditor.bind();
+    window.DDFlow.init();
     window.addEventListener('hashchange', route);
   }
 

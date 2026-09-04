@@ -95,6 +95,8 @@
     text-decoration:none; color:inherit; min-height:74px; transition:border-color .15s, background .15s;}
   .starter:hover{border-color:var(--seal); background:var(--seal-wash);}
   .starter:focus-visible{outline:3px solid var(--seal-wash); outline-offset:2px; border-color:var(--seal);}
+  .starter.make{background:var(--seal-wash); border-color:#ecd8d4;}
+  .starter.make b{color:var(--seal);}
   .starter b{font-family:var(--serif); font-size:15.5px; font-weight:700;}
   .starter span{font-size:11.5px; color:var(--ink-soft); line-height:1.45;}
   .countline{margin:14px 2px 6px; font-size:13px; color:var(--ink-soft);}
@@ -130,6 +132,12 @@
   .trow textarea{width:100%; font-family:var(--sans); font-size:15px; color:var(--ink); background:#fff;
     border:1px solid var(--line); border-radius:8px; padding:8px 10px; min-height:42px; resize:vertical;
     line-height:1.45;}
+  #flowText{width:100%; font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,var(--sans);
+    font-size:14.5px; line-height:1.85; color:var(--ink); background:#fff;
+    border:1px solid var(--line); border-radius:8px; padding:12px; resize:vertical; min-height:240px;
+    white-space:pre; overflow-wrap:normal; overflow-x:auto;}
+  ul.syntax{margin:6px 0 0; padding-left:1.3em;}
+  ul.syntax li{margin:4px 0;}
   details.paste{border:1px solid var(--line-soft); border-radius:8px; padding:10px 12px;
     background:var(--surface-2); margin:14px 0;}
   details.paste summary{cursor:pointer; font-size:13.5px; font-weight:500; min-height:28px;
@@ -203,6 +211,9 @@
       <h2>先從這幾張開始</h2>
       <p class="hint">最常被要求、又最難自己排的七種。點下去就是排好的中文圖，改成你的案子即可。</p>
       <div class="starters" id="starters"></div>
+      <p class="hint" style="margin-top:14px"><strong>步驟數不一樣、分岔不一樣？</strong>
+        範本只能換字，不能加減方塊。要自己決定有幾個步驟、幾個判斷、往哪裡分岔，
+        用 <a href="#/flow">流程圖產生器</a>——打大綱，版面由程式排。</p>
     </div>
 
     <div class="card">
@@ -245,6 +256,26 @@
       <h1 id="edHeading"></h1>
       <p class="lede" id="edUse"></p>
     </header>
+
+    <div class="card" id="flowCard" hidden>
+      <h2>流程大綱</h2>
+      <p class="hint">一行一個節點，<strong>由上往下就是流程的順序</strong>。三件事要記：</p>
+      <ul class="hint syntax">
+        <li>開頭寫 <code>開始</code> 或 <code>結束</code> 是橢圓、<code>判斷</code> 是菱形，其餘一律是矩形步驟。</li>
+        <li>斜線後面是小字副標：<code>步驟 登記收文 / 收發室</code>。</li>
+        <li>判斷底下<strong>縮排一行</strong>就是分支：<code>否 → 移文他科</code>（往右接一個結果）、
+          <code>是 ↑ 承辦人擬稿</code>（退回前面某一步，文字要一模一樣）。
+          打不出箭頭時 <code>-&gt;</code> 和 <code>^</code> 也可以。</li>
+      </ul>
+      <p class="hint">你只要標一條分支，往下走的那一條會自動標上相反的那個（是↔否）。</p>
+      <label class="sr-only" for="flowText">流程大綱</label>
+      <textarea id="flowText" rows="12" spellcheck="false"></textarea>
+      <p class="hint" id="flowCount" role="status" aria-live="polite"></p>
+      <p class="errbox" id="flowErr" role="alert"></p>
+      <div class="row">
+        <button type="button" id="flowResetBtn">放回範例</button>
+      </div>
+    </div>
 
     <div class="card">
       <h2>預覽</h2>
@@ -289,7 +320,7 @@
         <span>字太長時自動縮小字級（避免中文超出框線）</span></label>
     </div>
 
-    <div class="card">
+    <div class="card" id="textCard">
       <h2>圖上的文字</h2>
       <p class="hint" id="textCount"></p>
 
@@ -344,6 +375,7 @@
 <noscript><p style="padding:18px">這個工具需要 JavaScript 才能運作，所有運算都在你自己的瀏覽器裡跑，沒有伺服器。</p></noscript>
 <script src="app/core.js"></script>
 <script src="app/editor.js"></script>
+<script src="app/flow.js"></script>
 <script src="app/app.js"></script>
 </body>
 </html>

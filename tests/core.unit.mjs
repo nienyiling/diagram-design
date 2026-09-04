@@ -585,6 +585,147 @@ await t('safeFilename 太長會截短', () => {
   assert.ok(DD.safeFilename('字'.repeat(200), 'png').length <= 64);
 });
 
+/* ── 流程圖產生器 ────────────────────────────────────────────────── */
+
+await t('parseFlow：沒寫形狀就是步驟，寫了就照寫的', () => {
+  const p = DD.parseFlow('登記收文\n判斷 要不要陳核？\n開始 收到來文\n結束 發文');
+  assert.deepEqual(p.nodes.map((n) => n.kind), ['step', 'decision', 'start', 'end']);
+  assert.deepEqual(p.warnings, []);
+});
+await t('parseFlow：斜線後面是副標，全形半形都收', () => {
+  const p = DD.parseFlow('步驟 登記收文 / 收發室\n步驟 擬稿 ／ 附法令');
+  assert.equal(p.nodes[0].main, '登記收文');
+  assert.equal(p.nodes[0].sub, '收發室');
+  assert.equal(p.nodes[1].sub, '附法令');
+});
+await t('parseFlow：縮排一行接在判斷底下＝往右的分支', () => {
+  const p = DD.parseFlow('判斷 是否本科權責？\n  否 → 移文他科 / 副知來文機關');
+  assert.equal(p.nodes.length, 1);
+  assert.equal(p.nodes[0].branch.label, '否');
+  assert.equal(p.nodes[0].branch.text.main, '移文他科');
+  assert.equal(p.nodes[0].branch.text.sub, '副知來文機關');
+});
+await t('parseFlow：↑ 是退回，會對到前面那一步', () => {
+  const p = DD.parseFlow('步驟 承辦人擬稿\n步驟 科長審核\n判斷 要修正嗎？\n  是 ↑ 承辦人擬稿');
+  assert.equal(p.nodes[2].loop.index, 0);
+  assert.deepEqual(p.warnings, []);
+});
+await t('parseFlow：退回目標打錯字時講得出是哪一行、打了什麼', () => {
+  const p = DD.parseFlow('步驟 承辦人擬稿\n判斷 要修正嗎？\n  是 ↑ 承辦擬稿');
+  assert.equal(p.nodes[1].loop, null, '對不到就不要畫一條指向不明的線');
+  assert.equal(p.warnings.length, 1);
+  assert.match(p.warnings[0], /第 3 行/);
+  assert.match(p.warnings[0], /承辦擬稿/);
+});
+await t('parseFlow：打不出箭頭時 -> 與 ^ 也認得', () => {
+  const p = DD.parseFlow('步驟 甲\n判斷 乙？\n  否 -> 丙\n  是 ^ 甲');
+  assert.equal(p.nodes[1].branch.text.main, '丙');
+  assert.equal(p.nodes[1].loop.index, 0);
+});
+await t('parseFlow：項目符號當縮排也算', () => {
+  const p = DD.parseFlow('判斷 乙？\n- 否 → 丙');
+  assert.equal(p.nodes[0].branch.text.main, '丙');
+});
+await t('parseFlow：分支沒接在判斷底下要講清楚', () => {
+  const p = DD.parseFlow('步驟 甲\n  否 → 乙');
+  assert.equal(p.nodes.length, 1);
+  assert.match(p.warnings[0], /要接在「判斷」底下/);
+});
+await t('parseFlow：縮排那行看不懂時要講怎麼寫才對', () => {
+  const p = DD.parseFlow('判斷 乙？\n  隨便亂打');
+  assert.match(p.warnings[0], /否 → 移文他科/);
+});
+await t('parseFlow：同一個判斷只收一條往右、一條退回', () => {
+  const p = DD.parseFlow('步驟 甲\n判斷 乙？\n  否 → 丙\n  否 → 丁\n  是 ↑ 甲\n  是 ↑ 甲');
+  assert.equal(p.nodes[1].branch.text.main, '丙');
+  assert.equal(p.warnings.length, 2);
+});
+await t('parseFlow：空行與空白行跳過，不會生出空節點', () => {
+  const p = DD.parseFlow('\n步驟 甲\n\n   \n步驟 乙\n');
+  assert.equal(p.nodes.length, 2);
+});
+await t('parseFlow：只寫形狀沒寫內容時提醒，不畫空方塊', () => {
+  const p = DD.parseFlow('步驟');
+  assert.equal(p.nodes.length, 0);
+  assert.match(p.warnings[0], /只有形狀沒有內容/);
+});
+await t('parseFlow：空字串不會爆', () => {
+  assert.deepEqual(DD.parseFlow('').nodes, []);
+  assert.deepEqual(DD.parseFlow(null).nodes, []);
+});
+await t('flowOpposite：是↔否 這種成對的才自動標，其他留空', () => {
+  assert.equal(DD.flowOpposite('是'), '否');
+  assert.equal(DD.flowOpposite('否'), '是');
+  assert.equal(DD.flowOpposite('隨便'), '');
+});
+
+await t('layoutFlow：節點由上往下排，不重疊', () => {
+  const p = DD.parseFlow(DD.FLOW_EXAMPLE);
+  const lay = DD.layoutFlow(p.nodes);
+  assert.equal(lay.items.length, p.nodes.length);
+  for (let i = 1; i < lay.items.length; i++) {
+    assert.ok(lay.items[i].top > lay.items[i - 1].bottom,
+      `第 ${i} 格疊到第 ${i - 1} 格了`);
+  }
+  assert.ok(lay.height > lay.items[lay.items.length - 1].bottom);
+});
+await t('layoutFlow：字多的方塊會變高（不然字會爆出框）', () => {
+  const short = DD.layoutFlow(DD.parseFlow('步驟 甲').nodes).items[0];
+  const long = DD.layoutFlow(DD.parseFlow('步驟 ' + '很長的中文字'.repeat(6)).nodes).items[0];
+  assert.ok(long.h > short.h, `${long.h} 應該大於 ${short.h}`);
+  assert.ok(long.lines.length > 1);
+});
+
+await t('renderFlowSvg：畫得出完整的一張 svg', () => {
+  const svg = DD.renderFlowSvg(DD.parseFlow(DD.FLOW_EXAMPLE));
+  assert.ok(svg.startsWith('<svg '));
+  assert.ok(svg.endsWith('</svg>'));
+  assert.ok(DD.parseViewBox(svg), '沒有 viewBox 就組不出匯出檔');
+  ['收到來文', '移文他科', '發文並歸檔'].forEach((w) => assert.ok(svg.includes(w), w));
+});
+await t('renderFlowSvg：判斷是菱形、起訖是圓角、退回是虛線', () => {
+  const svg = DD.renderFlowSvg(DD.parseFlow(DD.FLOW_EXAMPLE));
+  assert.ok(svg.includes('<polygon points='), '沒有菱形');
+  assert.match(svg, /rx="2[0-9]/, '起訖沒有畫成橢圓');
+  assert.ok(svg.includes('stroke-dasharray'), '退回線沒有畫成虛線');
+});
+await t('renderFlowSvg：只標一條分支，往下那條自動標相反的', () => {
+  const svg = DD.renderFlowSvg(DD.parseFlow('判斷 要嗎？\n  否 → 結案\n步驟 續辦'));
+  assert.ok(svg.includes('>否<'));
+  assert.ok(svg.includes('>是<'), '往下走的那條沒有自動標「是」');
+});
+await t('renderFlowSvg：顏色用上游那四個色票，換配色才吃得到', () => {
+  const svg = DD.renderFlowSvg(DD.parseFlow(DD.FLOW_EXAMPLE));
+  assert.ok(svg.includes(DD.UPSTREAM_LIGHT.paper));
+  assert.ok(svg.includes(DD.UPSTREAM_LIGHT.ink));
+  assert.ok(svg.includes(DD.UPSTREAM_LIGHT.accent), '最後一個節點沒有用強調色');
+  const after = DD.applyPalette(svg, DD.UPSTREAM_LIGHT, DD.paletteById('gongwu').light);
+  assert.ok(after.includes('#f3f1e9'), '換不到工具箱的暖紙底');
+});
+await t('renderFlowSvg：使用者打的角括號會被轉義，不會變成標籤', () => {
+  const svg = DD.renderFlowSvg(DD.parseFlow('步驟 <script>alert(1)</script>'));
+  assert.ok(!svg.includes('<script'));
+  assert.ok(svg.includes('&lt;script&gt;'));
+});
+await t('renderFlowSvg：大綱空的時候畫一張說明用的空圖，不是壞掉的 svg', () => {
+  const svg = DD.renderFlowSvg(DD.parseFlow(''));
+  assert.ok(DD.parseViewBox(svg));
+  assert.ok(svg.includes('大綱框'));
+});
+await t('renderFlowSvg：產出的字族是本機字族，沒有 webfont', () => {
+  const svg = DD.renderFlowSvg(DD.parseFlow(DD.FLOW_EXAMPLE));
+  assert.ok(!/Geist|Instrument/.test(svg));
+  assert.ok(svg.includes('Noto Sans TC'));
+  assert.deepEqual(svg.match(/https?:\/\/(?!www\.w3\.org)/g), null, '不該有對外網址');
+});
+await t('內建範例是一份真的公文流程，而且自己解得開、沒有警告', () => {
+  const p = DD.parseFlow(DD.FLOW_EXAMPLE);
+  assert.deepEqual(p.warnings, []);
+  assert.ok(p.nodes.length >= 8);
+  assert.ok(p.nodes.some((n) => n.kind === 'decision' && n.branch));
+  assert.ok(p.nodes.some((n) => n.loop));
+});
+
 /* ── 分類與篩選 ──────────────────────────────────────────────────── */
 await t('parseAssetName 切得出類型與變體', () => {
   assert.deepEqual(DD.parseAssetName('example-flowchart.html'), { type: 'flowchart', variant: '' });

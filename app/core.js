@@ -872,6 +872,346 @@
     return (base || '圖表') + '.' + ext;
   }
 
+  /* ══ 流程圖產生器 ═══════════════════════════════════════════════════
+     範本庫只能換掉別人排好的字，不能決定「我要幾個步驟、幾個判斷、往哪裡分岔」。
+     這一段是真的產生器：使用者打大綱，程式自己算方塊大小、位置與連線。
+
+     大綱語法刻意只有三件事要記：
+       每一行就是一個節點：`步驟 登記收文 / 收發室`（斜線後面是小字副標）
+       開頭的詞決定形狀：開始、結束＝橢圓；判斷＝菱形；其餘一律是矩形步驟
+       判斷底下縮排一行就是分支：`否 → 移文他科`（往右）、`是 ↑ 承辦人擬稿`（退回前面某一步）
+
+     分出去的那條標了什麼，往下走的那條就自動標相反的那個（是↔否），
+     這樣使用者只要寫一行，兩條線都有標籤。 */
+
+  var FLOW_KEYWORDS = {
+    '開始': 'start', '起點': 'start', '起始': 'start', '收件': 'start',
+    '結束': 'end', '終點': 'end', '結果': 'end', '完成': 'end',
+    '判斷': 'decision', '決策': 'decision', '判定': 'decision', '問': 'decision',
+    '步驟': 'step', '作業': 'step', '處理': 'step'
+  };
+
+  /** 是↔否、Y↔N 這種成對的標籤，用來自動標往下走的那一條線。 */
+  var FLOW_OPPOSITE = { '是': '否', '否': '是', 'Y': 'N', 'N': 'Y', '有': '無', '無': '有',
+    '通過': '不通過', '不通過': '通過', '同意': '不同意', '不同意': '同意' };
+
+  function flowOpposite(label) {
+    return Object.prototype.hasOwnProperty.call(FLOW_OPPOSITE, label) ? FLOW_OPPOSITE[label] : '';
+  }
+
+  /** 把「主文 / 副標」切開。斜線、直線、全形的都收。 */
+  function splitFlowText(text) {
+    var m = String(text).split(/\s*[/／|｜]\s*/);
+    return { main: (m[0] || '').trim(), sub: (m[1] || '').trim() };
+  }
+
+  /**
+   * 讀大綱，切成節點。看不懂的行不會靜靜吞掉，一律回報在 warnings 裡——
+   * 使用者打錯字時要看得到「第 3 行看不懂」，而不是圖上少一塊還不知道為什麼。
+   */
+  function parseFlow(text) {
+    var lines = String(text == null ? '' : text).split(/\r\n|\r|\n/);
+    var nodes = [];
+    var warnings = [];
+
+    lines.forEach(function (raw, i) {
+      var lineNo = i + 1;
+      if (!raw.trim()) return;
+      /* 縮排（半形空白、tab、全形空白）或項目符號開頭＝這是上一個判斷的分支 */
+      var indented = /^[ \t　]+|^\s*[-‧•·]\s+/.test(raw);
+      var line = raw.replace(/^[\s　]+/, '').replace(/^[-‧•·]\s*/, '').trim();
+      if (!line) return;
+
+      if (indented) {
+        var last = nodes[nodes.length - 1];
+        if (!last || last.kind !== 'decision') {
+          warnings.push('第 ' + lineNo + ' 行：縮排的分支要接在「判斷」底下，這一行上面不是判斷。');
+          return;
+        }
+        var br = line.match(/^(.{1,6}?)\s*(→|->|=>|↑|\^)\s*(.+)$/);
+        if (!br) {
+          warnings.push('第 ' + lineNo + ' 行看不懂：分支要寫成「否 → 移文他科」或「是 ↑ 承辦人擬稿」。');
+          return;
+        }
+        var label = br[1].trim();
+        var arrow = br[2];
+        var target = br[3].trim();
+        if (/[↑^]/.test(arrow)) {
+          if (last.loop) { warnings.push('第 ' + lineNo + ' 行：同一個判斷只能有一條退回線。'); return; }
+          last.loop = { label: label, target: target, line: lineNo };
+        } else {
+          if (last.branch) { warnings.push('第 ' + lineNo + ' 行：同一個判斷只能有一條往右的分支。'); return; }
+          last.branch = { label: label, text: splitFlowText(target), line: lineNo };
+        }
+        return;
+      }
+
+      /* 主節點：開頭的詞決定形狀，沒寫就是步驟 */
+      var head = line.match(/^(\S+?)[\s　]+(.+)$/);
+      var kind = 'step';
+      var body = line;
+      if (head && Object.prototype.hasOwnProperty.call(FLOW_KEYWORDS, head[1])) {
+        kind = FLOW_KEYWORDS[head[1]];
+        body = head[2];
+      } else if (Object.prototype.hasOwnProperty.call(FLOW_KEYWORDS, line)) {
+        /* 整行就只有一個形狀關鍵字：使用者是打到一半，不是想畫一個叫「步驟」的方塊 */
+        body = '';
+      }
+      var t = splitFlowText(body);
+      if (!t.main) {
+        warnings.push('第 ' + lineNo + ' 行只有形狀沒有內容，跳過了。');
+        return;
+      }
+      nodes.push({ kind: kind, main: t.main, sub: t.sub, line: lineNo, branch: null, loop: null });
+    });
+
+    /* 退回線要指得到前面某一個節點，指不到就講清楚是哪一行、打了什麼 */
+    nodes.forEach(function (n, idx) {
+      if (!n.loop) return;
+      var found = -1;
+      for (var j = 0; j < idx; j++) {
+        if (nodes[j].main === n.loop.target) { found = j; break; }
+      }
+      if (found < 0) {
+        warnings.push('第 ' + n.loop.line + ' 行的退回目標「' + n.loop.target +
+          '」在前面找不到，要跟前面某一步的文字一模一樣。');
+        n.loop = null;
+      } else {
+        n.loop.index = found;
+      }
+    });
+
+    return { nodes: nodes, warnings: warnings };
+  }
+
+  /* 版面常數。跟範本庫同一套視覺：1000 寬、主幹置中、右邊留給分支。 */
+  var FLOW = {
+    W: 1000, cx: 500, top: 44, gap: 44,
+    boxW: 220, ovalW: 200, diaW: 210, diaH: 104,
+    sideX: 700, sideW: 200, sideH: 52,
+    loopX: 150,
+    fs: 13, fsSub: 9.5, fsLabel: 9.5, lineH: 17
+  };
+
+  function flowNodeWidth(n) {
+    if (n.kind === 'start' || n.kind === 'end') return FLOW.ovalW;
+    if (n.kind === 'decision') return FLOW.diaW;
+    return FLOW.boxW;
+  }
+
+  /** 依框寬把主文折行，回傳 {lines, w, h}。中文比英文寬，折行用估寬的那一套。 */
+  function flowNodeBox(n) {
+    var w = flowNodeWidth(n);
+    var inner = n.kind === 'decision' ? w * 0.62 : w - 30;
+    var lines = wrapLabel(n.main, inner / FLOW.fs);
+    if (!lines.length) lines = [''];
+    var h;
+    if (n.kind === 'decision') {
+      h = Math.max(FLOW.diaH, 58 + lines.length * FLOW.lineH);
+    } else {
+      h = Math.max(50, 26 + lines.length * FLOW.lineH + (n.sub ? 14 : 0));
+    }
+    return { w: w, h: h, lines: lines };
+  }
+
+  /** 算出每個節點的位置與大小。分開算是為了測得到——版面錯了要看得出來是哪一格。 */
+  function layoutFlow(nodes) {
+    var y = FLOW.top;
+    var placed = nodes.map(function (n) {
+      var b = flowNodeBox(n);
+      var item = { n: n, w: b.w, h: b.h, lines: b.lines, cy: y + b.h / 2, top: y, bottom: y + b.h };
+      y = item.bottom + FLOW.gap;
+      return item;
+    });
+    var height = (placed.length ? placed[placed.length - 1].bottom : FLOW.top) + 96;
+    return { items: placed, height: height };
+  }
+
+  function flowTextLines(lines, cx, cy, count, fs, fill, weight) {
+    var startY = cy - (count - 1) * FLOW.lineH / 2 + fs * 0.35;
+    return lines.map(function (ln, i) {
+      return '<text x="' + cx + '" y="' + round1(startY + i * FLOW.lineH) + '" fill="' + fill +
+        '" font-size="' + fs + '" font-family="' + FONTS.sans + '" font-weight="' + weight +
+        '" text-anchor="middle">' + escapeXml(ln) + '</text>';
+    }).join('');
+  }
+
+  function round1(v) { return Math.round(v * 10) / 10; }
+
+  /** 線上的小標籤：底下墊一塊紙色，不然會跟線疊在一起看不清楚。 */
+  function flowLabel(x, y, text) {
+    if (!text) return '';
+    var w = Math.max(18, textUnits(text) * FLOW.fsLabel + 10);
+    return '<rect x="' + round1(x - w / 2) + '" y="' + round1(y - 7) + '" width="' + round1(w) +
+      '" height="12" rx="2" fill="' + UPSTREAM_LIGHT.paper + '"/>' +
+      '<text x="' + x + '" y="' + round1(y + 2.5) + '" fill="' + UPSTREAM_LIGHT.muted +
+      '" font-size="' + FLOW.fsLabel + '" font-family="' + FONTS.mono +
+      '" text-anchor="middle" letter-spacing="0.1em">' + escapeXml(text) + '</text>';
+  }
+
+  function flowShape(item, accent) {
+    var n = item.n, cx = FLOW.cx, cy = item.cy, w = item.w, h = item.h;
+    var ink = UPSTREAM_LIGHT.ink, ac = UPSTREAM_LIGHT.accent;
+    var stroke = accent ? ac : ink;
+    var fill = accent ? 'rgba(235,108,54,0.08)' : '#ffffff';
+    if (n.kind === 'start' || n.kind === 'end') {
+      fill = accent ? 'rgba(235,108,54,0.08)' : 'rgba(45,49,66,0.03)';
+      return '<rect x="' + round1(cx - w / 2) + '" y="' + round1(item.top) + '" width="' + w +
+        '" height="' + round1(h) + '" rx="' + round1(h / 2) + '" fill="' + fill +
+        '" stroke="' + (accent ? ac : 'rgba(45,49,66,0.30)') + '" stroke-width="1"/>';
+    }
+    if (n.kind === 'decision') {
+      return '<polygon points="' + cx + ',' + round1(item.top) + ' ' + round1(cx + w / 2) + ',' + round1(cy) +
+        ' ' + cx + ',' + round1(item.bottom) + ' ' + round1(cx - w / 2) + ',' + round1(cy) +
+        '" fill="#ffffff" stroke="' + ink + '" stroke-width="1"/>';
+    }
+    return '<rect x="' + round1(cx - w / 2) + '" y="' + round1(item.top) + '" width="' + w +
+      '" height="' + round1(h) + '" rx="6" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1"/>';
+  }
+
+  /**
+   * 把大綱畫成一張自足的 SVG。
+   * 顏色一律用上游那四個色票的字面值，換配色與換字體那兩條路才吃得到它。
+   */
+  function renderFlowSvg(parsed, opts) {
+    var o = opts || {};
+    var nodes = (parsed && parsed.nodes) || [];
+    var lay = layoutFlow(nodes);
+    var items = lay.items;
+    var ink = UPSTREAM_LIGHT.ink, muted = UPSTREAM_LIGHT.muted, ac = UPSTREAM_LIGHT.accent;
+    var H = lay.height;
+    var parts = [];
+
+    parts.push('<svg viewBox="0 0 ' + FLOW.W + ' ' + Math.round(H) + '" xmlns="http://www.w3.org/2000/svg" ' +
+      'role="img" aria-label="' + escapeXml(o.title || '流程圖') + '">');
+    parts.push('<defs>' +
+      '<pattern id="ddflow-dots" width="22" height="22" patternUnits="userSpaceOnUse">' +
+      '<circle cx="1" cy="1" r="0.9" fill="rgba(45,49,66,0.10)"/></pattern>' +
+      '<marker id="ddflow-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">' +
+      '<polygon points="0 0, 8 3, 0 6" fill="' + muted + '"/></marker>' +
+      '<marker id="ddflow-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">' +
+      '<polygon points="0 0, 8 3, 0 6" fill="' + ac + '"/></marker>' +
+      '</defs>');
+    parts.push('<rect width="100%" height="100%" fill="' + UPSTREAM_LIGHT.paper + '"/>');
+    parts.push('<rect width="100%" height="100%" fill="url(#ddflow-dots)" opacity="0.55"/>');
+
+    if (!items.length) {
+      parts.push('<text x="' + FLOW.cx + '" y="' + Math.round(H / 2) + '" fill="' + muted +
+        '" font-size="14" font-family="' + FONTS.sans + '" text-anchor="middle">' +
+        '在上面的大綱框裡打字，這裡就會出現流程圖</text></svg>');
+      return parts.join('');
+    }
+
+    /* 先畫線，再畫方塊——線才不會蓋在框上面 */
+    items.forEach(function (item, i) {
+      var next = items[i + 1];
+      if (next) {
+        var last = i === items.length - 2 && next.n.kind === 'end';
+        parts.push('<line x1="' + FLOW.cx + '" y1="' + round1(item.bottom) + '" x2="' + FLOW.cx +
+          '" y2="' + round1(next.top - 2) + '" stroke="' + (last ? ac : muted) +
+          '" stroke-width="' + (last ? 1.4 : 1.2) + '" marker-end="url(#ddflow-arrow' +
+          (last ? '-accent' : '') + ')"/>');
+        /* 判斷往下走的那條線，自動標上分支的相反詞 */
+        var down = item.n.kind === 'decision'
+          ? flowOpposite((item.n.branch && item.n.branch.label) || (item.n.loop && item.n.loop.label) || '')
+          : '';
+        if (down) parts.push(flowLabel(FLOW.cx, (item.bottom + next.top) / 2, down));
+      }
+      if (item.n.branch) {
+        var by = item.cy;
+        parts.push('<line x1="' + round1(FLOW.cx + item.w / 2) + '" y1="' + round1(by) +
+          '" x2="' + (FLOW.sideX - 2) + '" y2="' + round1(by) + '" stroke="' + muted +
+          '" stroke-width="1.2" marker-end="url(#ddflow-arrow)"/>');
+        parts.push(flowLabel((FLOW.cx + item.w / 2 + FLOW.sideX) / 2, by - 8, item.n.branch.label));
+      }
+      if (item.n.loop && item.n.loop.index != null) {
+        var target = items[item.n.loop.index];
+        if (target) {
+          var x0 = round1(FLOW.cx - item.w / 2);
+          var x1 = FLOW.loopX;
+          var ty = round1(target.cy);
+          parts.push('<path d="M ' + x0 + ' ' + round1(item.cy) + ' H ' + x1 + ' V ' + ty +
+            ' H ' + round1(FLOW.cx - target.w / 2 - 2) + '" fill="none" stroke="' + muted +
+            '" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#ddflow-arrow)"/>');
+          parts.push(flowLabel(x1, (item.cy + ty) / 2, item.n.loop.label));
+        }
+      }
+    });
+
+    /* 方塊與文字 */
+    items.forEach(function (item, i) {
+      var n = item.n;
+      var accent = n.kind === 'end' && i === items.length - 1;
+      parts.push(flowShape(item, accent));
+      var textCy = n.sub ? item.cy - 7 : item.cy;
+      parts.push(flowTextLines(item.lines, FLOW.cx, textCy, item.lines.length,
+        n.kind === 'decision' ? 12 : FLOW.fs, ink, '600'));
+      if (n.sub) {
+        parts.push('<text x="' + FLOW.cx + '" y="' + round1(item.cy + (item.lines.length - 1) * FLOW.lineH / 2 + 16) +
+          '" fill="' + muted + '" font-size="' + FLOW.fsSub + '" font-family="' + FONTS.mono +
+          '" text-anchor="middle">' + escapeXml(n.sub) + '</text>');
+      }
+      if (n.branch) {
+        var bw = FLOW.sideW, bx = FLOW.sideX, bh = FLOW.sideH;
+        var byTop = round1(item.cy - bh / 2);
+        parts.push('<rect x="' + bx + '" y="' + byTop + '" width="' + bw + '" height="' + bh +
+          '" rx="' + (bh / 2) + '" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>');
+        var bcx = bx + bw / 2;
+        var blines = wrapLabel(n.branch.text.main, (bw - 28) / 12);
+        parts.push(flowTextLines(blines, bcx, n.branch.text.sub ? item.cy - 7 : item.cy,
+          blines.length, 12, ink, '600'));
+        if (n.branch.text.sub) {
+          parts.push('<text x="' + bcx + '" y="' + round1(item.cy + (blines.length - 1) * FLOW.lineH / 2 + 16) +
+            '" fill="' + muted + '" font-size="' + FLOW.fsSub + '" font-family="' + FONTS.mono +
+            '" text-anchor="middle">' + escapeXml(n.branch.text.sub) + '</text>');
+        }
+      }
+    });
+
+    /* 圖例：跟範本庫同一套，讓自己排的圖跟挑來的圖看起來是一家人 */
+    var ly = H - 58;
+    parts.push('<line x1="40" y1="' + round1(ly) + '" x2="960" y2="' + round1(ly) +
+      '" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>');
+    parts.push('<text x="40" y="' + round1(ly + 16) + '" fill="' + muted + '" font-size="8" font-family="' +
+      FONTS.mono + '" letter-spacing="0.18em">圖例 · 形狀代表類型</text>');
+    var legend = [['起訖（橢圓）', 24], ['步驟（矩形）', 6], ['判斷（菱形）', -1], ['退回', -2]];
+    var lx = 40;
+    legend.forEach(function (it) {
+      var name = it[0], rx = it[1];
+      if (rx === -1) {
+        parts.push('<polygon points="' + (lx + 12) + ',' + round1(ly + 26) + ' ' + (lx + 24) + ',' +
+          round1(ly + 32) + ' ' + (lx + 12) + ',' + round1(ly + 38) + ' ' + lx + ',' + round1(ly + 32) +
+          '" fill="#ffffff" stroke="' + ink + '" stroke-width="1"/>');
+      } else if (rx === -2) {
+        parts.push('<line x1="' + lx + '" y1="' + round1(ly + 32) + '" x2="' + (lx + 24) + '" y2="' +
+          round1(ly + 32) + '" stroke="' + muted + '" stroke-width="1.2" stroke-dasharray="4 3"/>');
+      } else {
+        parts.push('<rect x="' + lx + '" y="' + round1(ly + 26) + '" width="24" height="12" rx="' + rx +
+          '" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>');
+      }
+      parts.push('<text x="' + (lx + 32) + '" y="' + round1(ly + 36) + '" fill="' + muted +
+        '" font-size="8.5" font-family="' + FONTS.sans + '">' + escapeXml(name) + '</text>');
+      lx += 32 + textUnits(name) * 8.5 + 34;
+    });
+
+    parts.push('</svg>');
+    return parts.join('');
+  }
+
+  /* 打開產生器時先給一個真的公文流程，使用者照著改比從空白開始容易得多 */
+  var FLOW_EXAMPLE = [
+    '開始 收到來文',
+    '步驟 登記收文 / 收發室',
+    '判斷 是否本科權責？',
+    '  否 → 移文他科 / 並副知來文機關',
+    '步驟 承辦人擬稿 / 附法令依據',
+    '步驟 科長審核',
+    '判斷 內容是否需要修正？',
+    '  是 ↑ 承辦人擬稿',
+    '步驟 主管決行',
+    '結束 發文並歸檔'
+  ].join('\n');
+
   /* ── 清單篩選 ────────────────────────────────────────────────────── */
 
   /**
@@ -942,6 +1282,9 @@
     parseViewBox: parseViewBox, textUnits: textUnits, wrapLabel: wrapLabel, shrinkToFit: shrinkToFit,
     setSvgAttrs: setSvgAttrs, composeExportSvg: composeExportSvg, svgFile: svgFile,
     buildStandaloneHtml: buildStandaloneHtml, safeFilename: safeFilename,
+    FLOW: FLOW, FLOW_EXAMPLE: FLOW_EXAMPLE, FLOW_KEYWORDS: FLOW_KEYWORDS,
+    splitFlowText: splitFlowText, flowOpposite: flowOpposite,
+    parseFlow: parseFlow, layoutFlow: layoutFlow, renderFlowSvg: renderFlowSvg,
     parseAssetName: parseAssetName, typeLabel: typeLabel, variantLabel: variantLabel,
     filterDiagrams: filterDiagrams
   };
