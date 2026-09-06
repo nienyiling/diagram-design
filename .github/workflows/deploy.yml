@@ -51,60 +51,43 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
+      # 部署有兩條路，二選一：
+      #   (a) 這支 workflow：要設 repo secret（CLOUDFLARE_API_TOKEN／ACCOUNT_ID）
+      #   (b) Cloudflare 後台的 Git 整合：不必 secret，Cloudflare 自己拉 repo 建置
+      # 走 (b) 的話這支就沒有憑證可用。這時**跳過而不是失敗**——
+      # 每次推 main 都亮一個紅叉，久了就沒人看 Actions 了。
       - name: 檢查部署憑證
+        id: creds
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          missing=""
-          [ -n "$CLOUDFLARE_API_TOKEN" ]  || missing="$missing CLOUDFLARE_API_TOKEN"
-          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
-          if [ -n "$missing" ]; then
-            echo "::error::缺少 repo secret：$missing"
-            echo "請到 Settings → Secrets and variables → Actions 新增；取得方式見 README「部署」段。" >&2
-            exit 1
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "憑證齊備，這支 workflow 會負責部署。"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### 這支 workflow 沒有部署（缺 Cloudflare 憑證）"
+              echo ""
+              echo "測試已經跑完並通過。目前沒有設 \`CLOUDFLARE_API_TOKEN\`／\`CLOUDFLARE_ACCOUNT_ID\`，"
+              echo "所以部署那幾步跳過了。這是**正常的**，如果你是用 Cloudflare 後台的 Git 整合部署。"
+              echo ""
+              echo "要改成由 Actions 部署，到 Settings → Secrets and variables → Actions 補上這兩個 secret；"
+              echo "取得方式見 README 的「部署」段。"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::沒有 Cloudflare 憑證，跳過部署（走 Cloudflare 後台 Git 整合的話這是正常的）"
           fi
-          echo "憑證齊備。"
 
-      # 只把要上線的檔案放進 dist：vendor/upstream 是建置來源（2.3 MB 的上游 HTML），
-      # 站上跑的時候用不到，不要推上 CDN。
+      # 組出 dist 與「缺檔就失敗」的檢查都在 scripts/dist.mjs，
+      # 跟 Cloudflare 後台 Git 整合那條路共用同一份清單——
+      # 兩邊各寫一份的話，遲早會一邊上線、另一邊少檔案。
       - name: 組出部署目錄
-        run: |
-          mkdir -p dist
-          cp index.html _headers dist/
-          cp -r app data dist/
-          echo "--- 部署包內容："
-          find dist -type f | sort
-          du -sh dist
-
-      # 少了 data/diagrams.json，首頁完全正常，只是一張範本都沒有。
-      # 這種壞法要等使用者真的打開才會發現，所以先擋一道。
-      - name: 檢查部署包齊不齊
-        run: |
-          missing=""
-          for f in \
-            dist/index.html \
-            dist/_headers \
-            dist/app/core.js \
-            dist/app/app.js \
-            dist/app/editor.js \
-            dist/app/gen.js \
-            dist/app/forms.js \
-            dist/data/diagrams.json
-          do
-            [ -f "$f" ] || missing="$missing $f"
-          done
-          if [ -n "$missing" ]; then
-            echo "::error::部署包缺少檔案：$missing"
-            exit 1
-          fi
-          count=$(node -e "console.log(require('./dist/data/diagrams.json').count)")
-          if [ "$count" -lt 100 ]; then
-            echo "::error::範本只剩 $count 張，資料檔應該是壞的"
-            exit 1
-          fi
-          echo "部署包齊備，範本 $count 張。"
+        run: npm run dist
 
       # 首次執行時 Pages 專案還不存在，先建立；已存在則視為成功
       #
@@ -113,6 +96,7 @@ jobs:
       # 若第一次跑的時候 repo 預設分支還是 claude/xxx，正式網址就會永遠掛在那個分支名下，
       # 之後推 main 全部變成 preview 部署——這種錯很難發現，也很難修。
       - name: 確保 Pages 專案存在
+        if: steps.creds.outputs.ok == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -129,6 +113,7 @@ jobs:
           fi
 
       - name: wrangler pages deploy
+        if: steps.creds.outputs.ok == 'true'
         id: cf
         uses: cloudflare/wrangler-action@v3
         with:
@@ -143,6 +128,7 @@ jobs:
       # 網址一律取自 wrangler 輸出，不要寫死：Pages 子網域全球唯一，
       # 名稱被占用時 Cloudflare 會自動加後綴（dayoff → dayoff-ala.pages.dev 就是這樣來的）
       - name: 摘要
+        if: steps.creds.outputs.ok == 'true'
         env:
           DEPLOY_URL: ${{ steps.cf.outputs.deployment-url }}
           ALIAS_URL: ${{ steps.cf.outputs.pages-deployment-alias-url }}

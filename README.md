@@ -141,14 +141,46 @@ vendor/upstream/         上游範例圖的原樣副本＋LICENSE＋SOURCE.json�
 
 ## 部署
 
-**push 就自動上線**，走 `.github/workflows/deploy.yml`（測試 → 組 dist → `wrangler pages deploy`），
-不必到 Cloudflare 後台按任何東西。這一套跟 `nienyiling/Pdftoword`、`nienyiling/dayoff` 是同一個模式。
+**push 到 main 就上線。** 有兩條路，二選一，設好一次就不用再管：
+
+### (a) Cloudflare 後台的 Git 整合（不必弄 token）
+
+Cloudflare 自己來拉 repo、自己建置。在 Cloudflare Dashboard →
+**Workers & Pages → Create → Pages → Connect to Git**，選這個 repo，然後：
+
+| 欄位 | 填什麼 |
+|---|---|
+| Framework preset | None |
+| Build command | `npm run dist` |
+| Build output directory | `dist` |
+| Production branch | `main` |
+
+按 Save and Deploy。之後每次推 main 就會自動重新建置上線。
+**正式網址在部署完成的頁面上**——Pages 子網域全球唯一，撞名會自動加後綴
+（dayoff → `dayoff-ala.pages.dev` 就是這樣來的），所以不要用猜的、也不要寫死在任何地方。
+
+這條路底下 `.github/workflows/deploy.yml` 仍然會跑測試，只是**部署那幾步會自己跳過**
+（沒有憑證），Actions 顯示綠色並在摘要裡說明。
+
+### (b) GitHub Actions 自己部署（要 token）
+
+走 `.github/workflows/deploy.yml`（測試 → `npm run dist` → `wrangler pages deploy`），
+跟 `nienyiling/Pdftoword`、`nienyiling/dayoff` 同一個模式。
 
 - 憑證是 repo secret：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`。
   GitHub 的 secret 每個 repo 各自獨立，**別的 repo 設過不等於這個 repo 有**，新 repo 要再設一次：
   <https://github.com/nienyiling/diagram-design/settings/secrets/actions/new>
-- 部署包只放 `index.html`、`_headers`、`app/`、`data/`。`vendor/upstream/` 是建置來源，不上 CDN。
-  workflow 裡有一份必要檔案清單，**新增 `app/*.js` 時要同步加進去**。
+- token 在 Cloudflare Dashboard → My Profile → API Tokens → Create Token →
+  用 **Edit Cloudflare Workers** 範本（含 Pages 權限）；Account ID 在 Workers & Pages 的右欄。
+- **兩條路不要同時開**，會互相蓋掉部署。
+
+### 兩條路共用的部分
+
+- 部署包由 `npm run dist` 組出來（`scripts/dist.mjs`），只放 `index.html`、`_headers`、`app/`、`data/`。
+  `vendor/upstream/`（建置來源）、`tests/`、`scripts/`、`content/` 都不上 CDN。
+  **清單只有一份**，缺檔就讓建置失敗——少了 `data/diagrams.json` 首頁完全正常，
+  只是一張範本都沒有，要等使用者真的點下去才發現。
+  **新增 `app/*.js` 時要同步加進 `scripts/dist.mjs` 的 `REQUIRED`。**
 - Pages 專案的 production branch 寫死 `main`，不要用 `default_branch`：那個值只在專案建立當下生效，
   之後只能到 Cloudflare 後台改，弄錯的話推 main 會全部變成 preview 部署。
 - 網址不要寫死在任何地方：Pages 子網域全球唯一，撞名會自動加後綴

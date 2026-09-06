@@ -5,6 +5,7 @@
   "description": "公務用圖表工具：填表產生流程圖、甘特圖、時間軸、分層圖、四象限，另有範本可改字。純前端、零對外連線",
   "scripts": {
     "build": "node scripts/build-data.mjs",
+    "dist": "node scripts/dist.mjs",
     "test": "node tests/core.unit.mjs && node tests/gen.unit.mjs && node tests/data.mjs && node tests/e2e.mjs",
     "test:unit": "node tests/core.unit.mjs && node tests/gen.unit.mjs && node tests/data.mjs",
     "test:e2e": "node tests/e2e.mjs",

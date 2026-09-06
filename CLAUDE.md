@@ -194,11 +194,17 @@ e2e 的上移下移會點到那一列去。
 
 ## 部署
 
-**push 就自動上線**，走 `.github/workflows/deploy.yml`。細節與注意事項見 `README.md` 的「部署」段。
+**push 到 main 就上線。** 兩條路二選一，細節與後台設定見 `README.md` 的「部署」段：
 
-- 憑證是 repo secret：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`（每個 repo 各自獨立）。
-- workflow 裡有一份部署包必要檔案清單，**新增 `app/*.js` 時要同步加進去**，不然
-  首頁看起來完全正常，使用者一點做圖入口才發現整支壞掉。
+- **(a) Cloudflare 後台 Git 整合**：建置指令 `npm run dist`、輸出目錄 `dist`，不必弄 token。
+  這時 `.github/workflows/deploy.yml` 仍會跑測試，但**部署那幾步自己跳過**（`steps.creds.outputs.ok`）
+  ——沒憑證時跳過而不是失敗，每次推 main 都亮紅叉的話久了就沒人看 Actions 了。
+- **(b) GitHub Actions 部署**：要 repo secret `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`
+  （每個 repo 各自獨立）。**兩條路不要同時開**，會互相蓋掉部署。
+- 部署包由 `scripts/dist.mjs` 組（`npm run dist`），workflow 與 Cloudflare 後台**共用同一份清單**。
+  兩邊各寫一份的話遲早會一邊上線、另一邊少檔案。
+  **新增 `app/*.js` 時要同步加進 `REQUIRED`**，不然首頁看起來完全正常，
+  使用者一點做圖入口才發現整支壞掉。
 - Pages 專案的 production branch 寫死 `main`，不要用 `default_branch`。
 - 網址一律從 Actions 的部署摘要讀，不要猜——Pages 子網域撞名會自動加後綴。
 - 驗收不能只看首頁：要進一支產生器改一格字、加一列、真的下載一次 PNG，範本那條路也點一張。
