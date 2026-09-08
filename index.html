@@ -312,11 +312,6 @@
         下面的縮圖是<strong>照範例內容真的畫出來的</strong>——填完你的內容，
         得到的就是同一種樣子。</p>
       <div class="makes" id="makes"></div>
-      <p class="hint" style="margin-top:16px"><strong>形狀對不上、想自己擺？</strong>
-        <a href="#/board">開一塊空白畫板 →</a>
-        自己拖形狀、自己連線、自己改大小顏色。
-        （建議先用上面的填表產生，排好之後再搬到畫板微調——從空白開始畫流程圖，
-        跟在 Word 裡拉方塊一樣痛苦。）</p>
     </div>
 
     <!-- 範本資料載不進來時的訊息。刻意放在收合區「外面」——
@@ -430,17 +425,29 @@
         也可以傳給同事接手。填的內容本來就會留在這台電腦的瀏覽器裡，關掉分頁再開還在。</p>
       <p class="hint"><a href="#/" id="makeSample">看一張排好的範本</a>
         ——想知道「這種圖長什麼樣子」的時候看，不必照它填。</p>
-      <p class="hint" id="toBoardWrap" hidden>形狀不夠用、有一格想擺到別的地方？
-        <button type="button" id="toBoardBtn">把這張圖搬到畫板繼續改 →</button>
-        搬過去之後每一格都拖得動，但<strong>不能再搬回填表畫面</strong>。</p>
+      <div id="toBoardWrap" hidden>
+        <p class="hint" style="margin-top:18px"><strong>想自己擺位置？</strong>
+          流程圖還有另一種畫法：<strong>畫板</strong>——自己拖形狀、自己連線、
+          自己改大小顏色，線會黏在形狀上。</p>
+        <div class="row">
+          <button type="button" id="toBoardBtn">把這張圖搬到畫板繼續改 →</button>
+          <button type="button" id="blankBoardBtn">開空白畫板自己畫</button>
+        </div>
+        <p class="hint"><strong>建議走左邊那條</strong>：先在上面填一填讓程式排好，
+          再搬到畫板微調。從空白開始畫流程圖，跟在 Word 裡拉方塊一樣痛苦。
+          搬過去之後每一格都拖得動，但<strong>不能再搬回填表畫面</strong>
+          （這邊填的內容會留著，隨時可以回來重新產生一次）。</p>
+      </div>
     </div>
 
     <!-- ══════════ 自由畫板 ══════════ -->
     <div class="card" id="bdCard" hidden>
-      <h2>畫板</h2>
+      <h2>畫板（自己畫流程圖）</h2>
       <p class="hint">從下面挑一個形狀加進來，拖它到想要的位置。拖角落的小方塊改大小，
         點「連線」再點兩個形狀就把它們接起來。<strong>線會黏在形狀上</strong>，
         之後拖動方塊時線會跟著跑。</p>
+      <p class="hint">排版很花時間的話，<a href="#/make/flow">回填表畫面</a>讓程式先排好，
+        再搬過來微調。</p>
       <div class="bdtools" id="bdTools"></div>
       <div class="row">
         <button type="button" id="bdLinkBtn" aria-pressed="false">連線</button>

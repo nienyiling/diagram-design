@@ -359,7 +359,7 @@
     var svg = B.renderBoard(board, { grid: false, title: el.edTitleIn.value || '自己畫的圖' });
     var box = DD.parseViewBox(svg) || { w: B.W, h: 600 };
     window.DDEditor.open({
-      id: 'board', type: 'board', typeZh: '自己畫的圖', variantZh: '畫板',
+      id: 'board', type: 'board', typeZh: '流程圖', variantZh: '自己畫的',
       use: '自己拖形狀、自己連線', variant: '', dark: false,
       title: '自己畫的圖', eyebrow: '流程圖', heading: '', desc: '',
       w: box.w, h: box.h, png: true, segs: 0,
@@ -367,7 +367,7 @@
       svg: svg
     }, {
       flow: true, keepTitle: true,
-      genHeading: '自己畫一張圖',
+      genHeading: '自己畫一張流程圖',
       genUse: '拖形狀、連線、改字改色。線黏在形狀上，拖動方塊時線會跟著跑。'
     });
   }

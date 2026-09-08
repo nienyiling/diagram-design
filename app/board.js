@@ -23,6 +23,10 @@
   var W = 1000;
   var GRID = 10;
   var MIN_H = 560;
+  /* 兩個方塊的中心只差這麼一點時，直角路由會轉出一個很小的階梯，
+     看起來像畫錯而不像刻意。這種距離直接走一條幾乎看不出來的斜線就好。
+     常見成因：使用者把其中一個方塊拉寬了，中心跟著移了十幾個像素。 */
+  var JOG = 30;
 
   function esc(s) { return DD.escapeXml(s); }
   function r1(v) { return Math.round(v * 10) / 10; }
@@ -164,14 +168,14 @@
       p0 = anchor(a, ca.x, cb.y > ca.y ? ca.y + 1e4 : ca.y - 1e4);
       p1 = anchor(b, cb.x, cb.y > ca.y ? cb.y - 1e4 : cb.y + 1e4);
       var my = (p0.y + p1.y) / 2;
-      pts = (Math.abs(p0.x - p1.x) < 1)
+      pts = (Math.abs(p0.x - p1.x) <= JOG)
         ? [p0, p1]
         : [p0, { x: p0.x, y: my }, { x: p1.x, y: my }, p1];
     } else {
       p0 = anchor(a, cb.x > ca.x ? ca.x + 1e4 : ca.x - 1e4, ca.y);
       p1 = anchor(b, cb.x > ca.x ? cb.x - 1e4 : cb.x + 1e4, cb.y);
       var mx = (p0.x + p1.x) / 2;
-      pts = (Math.abs(p0.y - p1.y) < 1)
+      pts = (Math.abs(p0.y - p1.y) <= JOG)
         ? [p0, p1]
         : [p0, { x: mx, y: p0.y }, { x: mx, y: p1.y }, p1];
     }
@@ -305,12 +309,16 @@
       return parts.join('');
     }
 
-    /* 先線後框：線才不會蓋在框上面 */
+    /* 先所有的線，再所有的標籤，最後才是框。
+       線與標籤分兩輪畫是因為線會交叉——同一輪畫的話，後畫的那條線會直接
+       壓過前一條線的標籤，「否」就變成看不懂的一團。 */
+    var labels = [];
     board.links.forEach(function (l) {
       var pts = routeLink(byId[l.from], byId[l.to], board.shapes);
       parts.push(linkPath(pts, l));
-      parts.push(linkLabel(linkMid(pts), l.label));
+      if (l.label) labels.push(linkLabel(linkMid(pts), l.label));
     });
+    parts = parts.concat(labels);
     board.shapes.forEach(function (s) {
       parts.push(shapePath(s));
       parts.push(shapeText(s));
@@ -478,7 +486,7 @@
   }
 
   return {
-    W: W, GRID: GRID, KINDS: KINDS, COLORS: COLORS,
+    W: W, GRID: GRID, JOG: JOG, KINDS: KINDS, COLORS: COLORS,
     kindById: kindById, colorById: colorById, snap: snap,
     normShape: normShape, normBoard: normBoard, boardHeight: boardHeight,
     anchor: anchor, routeLink: routeLink, linkMid: linkMid,

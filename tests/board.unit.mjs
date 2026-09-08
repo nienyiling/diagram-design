@@ -140,6 +140,17 @@ await t('左邊沒空間時，繞邊改走右邊', () => {
   assert.ok(pts[1].x > 200, '左邊沒空間卻還是往左繞：' + pts[1].x);
 });
 
+await t('中心只差一點時走一條直線，不要轉出一個小階梯（看起來像畫錯）', () => {
+  /* 常見成因：使用者把其中一個方塊拉寬了，中心跟著移了十幾個像素 */
+  const wide = shape({ id: 'a', x: 400, y: 100, w: 240, h: 80 });
+  const below = shape({ id: 'b', x: 400, y: 280, w: 200, h: 60 });
+  assert.equal(B.routeLink(wide, below, [wide, below]).length, 2,
+    '差 ' + ((wide.x + wide.w / 2) - (below.x + below.w / 2)) + 'px 就轉彎了');
+  /* 真的排在旁邊的還是要走直角，不然會變成一條長斜線 */
+  const aside = shape({ id: 'c', x: 700, y: 280, w: 200, h: 60 });
+  assert.equal(B.routeLink(wide, aside, [wide, aside]).length, 4, '離得遠的應該走直角');
+});
+
 await t('linkMid 落在線上，標籤才不會飄在旁邊', () => {
   const a = shape({ id: 'a', x: 400, y: 100, w: 200, h: 60 });
   const b = shape({ id: 'b', x: 400, y: 300, w: 200, h: 60 });
@@ -164,6 +175,18 @@ await t('renderBoard：空的時候給一句「該做什麼」，不是空白也
   const svg = B.renderBoard({ shapes: [], links: [] }, {});
   assert.match(svg, /^<svg[\s\S]*<\/svg>$/);
   assert.match(words(svg), /挑一個形狀/);
+});
+
+await t('線上的標籤畫在所有線之上（交叉時才不會被壓掉）', () => {
+  const b = boardOf(
+    [{ id: 'a', x: 400, y: 40, w: 200, h: 60 }, { id: 'b', x: 400, y: 300, w: 200, h: 60 },
+     { id: 'c', x: 40, y: 160, w: 200, h: 60 }, { id: 'd', x: 740, y: 160, w: 200, h: 60 }],
+    [{ from: 'a', to: 'b', label: '否' }, { from: 'c', to: 'd' }]
+  );
+  const svg = B.renderBoard(b, {});
+  const lastPath = svg.lastIndexOf('<path');
+  const label = svg.indexOf('>否<');
+  assert.ok(label > lastPath, '標籤畫在線之前，交叉的線會把它壓掉');
 });
 
 await t('renderBoard：每一種形狀畫出來的圖元不一樣', () => {

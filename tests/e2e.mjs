@@ -985,6 +985,25 @@ async function bdClick(p, x, y) {
 const bdMid = (s) => [s.x + s.w / 2, s.y + s.h / 2];
 const bdTool = (p, name) => p.locator('#bdTools button', { hasText: name });
 
+await t('畫板是從流程圖裡進去的，首頁沒有它自己的入口（它只是自己畫流程圖）', async () => {
+  await page.goto(server.url, { waitUntil: 'networkidle' });
+  assert.equal(await page.locator('a[href="#/board"]').count(), 0,
+    '首頁不該有畫板的獨立入口');
+  await page.goto(server.url + '#/make/flow', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  assert.equal(await page.locator('#toBoardWrap').isVisible(), true);
+  assert.equal(await page.locator('#blankBoardBtn').isVisible(), true, '缺了「開空白畫板」');
+  await page.locator('#blankBoardBtn').click();
+  await page.waitForTimeout(600);
+  assert.equal(new URL(page.url()).hash, '#/board');
+  /* 麵包屑要看得出這是流程圖底下的一種畫法 */
+  assert.ok((await page.locator('#edKind').innerText()).includes('流程圖'),
+    await page.locator('#edKind').innerText());
+  /* 而且要有一條回填表的路 */
+  assert.ok(await page.locator('#bdCard a[href="#/make/flow"]').count() >= 1,
+    '畫板裡沒有回填表畫面的路');
+});
+
 await t('畫板打得開，工具列是照 board.js 的規格長出來的', async () => {
   await page.goto(server.url + '#/board', { waitUntil: 'networkidle' });
   await page.locator('#bdStage svg').waitFor({ timeout: 5000 });

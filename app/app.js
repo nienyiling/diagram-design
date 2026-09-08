@@ -270,7 +270,7 @@
       gallery.hidden = true;
       editor.hidden = false;
       window.scrollTo(0, 0);
-      document.title = '畫板 — 公務用圖表工具';
+      document.title = '流程圖畫板 — 公務用圖表工具';
       window.DDForms.close();
       window.DDCanvas.open();
       return;

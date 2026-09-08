@@ -473,7 +473,8 @@
       'makeAddBtn', 'makeExampleBtn', 'makeClearBtn', 'makeUndoBtn', 'makeCount', 'makeErr',
       'makeTip', 'makeSample', 'makePasteBox', 'makePasteBtn', 'makePasteAddBtn', 'makePasteErr',
       'makePasteHint', 'makeSaveBtn', 'makeLoadInput',
-      'edTitleIn', 'edEyebrow', 'paletteSel', 'fontSel', 'toBoardWrap', 'toBoardBtn']
+      'edTitleIn', 'edEyebrow', 'paletteSel', 'fontSel',
+      'toBoardWrap', 'toBoardBtn', 'blankBoardBtn']
       .forEach(function (id) { el[id] = $(id); });
 
     restore();
@@ -524,6 +525,7 @@
       window.DDCanvas.seed(flowNodes(st.rows));
       location.hash = '#/board';
     });
+    el.blankBoardBtn.addEventListener('click', function () { location.hash = '#/board'; });
     el.makePasteBtn.addEventListener('click', function () { applyPaste(true); });
     el.makePasteAddBtn.addEventListener('click', function () { applyPaste(false); });
     el.makeSaveBtn.addEventListener('click', saveProject);
