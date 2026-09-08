@@ -585,145 +585,207 @@ await t('safeFilename 太長會截短', () => {
   assert.ok(DD.safeFilename('字'.repeat(200), 'png').length <= 64);
 });
 
-/* ── 流程圖產生器 ────────────────────────────────────────────────── */
+/* ── 流程圖的版面引擎 ─────────────────────────────────────────────
+   大綱語法已經拿掉了（現在是填表），所以這裡測的是「節點 → 版面 → SVG」，
+   節點長什麼樣子由 gen.js 決定，gen.unit 測那一段。 */
 
-await t('parseFlow：沒寫形狀就是步驟，寫了就照寫的', () => {
-  const p = DD.parseFlow('登記收文\n判斷 要不要陳核？\n開始 收到來文\n結束 發文');
-  assert.deepEqual(p.nodes.map((n) => n.kind), ['step', 'decision', 'start', 'end']);
-  assert.deepEqual(p.warnings, []);
-});
-await t('parseFlow：斜線後面是副標，全形半形都收', () => {
-  const p = DD.parseFlow('步驟 登記收文 / 收發室\n步驟 擬稿 ／ 附法令');
-  assert.equal(p.nodes[0].main, '登記收文');
-  assert.equal(p.nodes[0].sub, '收發室');
-  assert.equal(p.nodes[1].sub, '附法令');
-});
-await t('parseFlow：縮排一行接在判斷底下＝往右的分支', () => {
-  const p = DD.parseFlow('判斷 是否本科權責？\n  否 → 移文他科 / 副知來文機關');
-  assert.equal(p.nodes.length, 1);
-  assert.equal(p.nodes[0].branch.label, '否');
-  assert.equal(p.nodes[0].branch.text.main, '移文他科');
-  assert.equal(p.nodes[0].branch.text.sub, '副知來文機關');
-});
-await t('parseFlow：↑ 是退回，會對到前面那一步', () => {
-  const p = DD.parseFlow('步驟 承辦人擬稿\n步驟 科長審核\n判斷 要修正嗎？\n  是 ↑ 承辦人擬稿');
-  assert.equal(p.nodes[2].loop.index, 0);
-  assert.deepEqual(p.warnings, []);
-});
-await t('parseFlow：退回目標打錯字時講得出是哪一行、打了什麼', () => {
-  const p = DD.parseFlow('步驟 承辦人擬稿\n判斷 要修正嗎？\n  是 ↑ 承辦擬稿');
-  assert.equal(p.nodes[1].loop, null, '對不到就不要畫一條指向不明的線');
-  assert.equal(p.warnings.length, 1);
-  assert.match(p.warnings[0], /第 3 行/);
-  assert.match(p.warnings[0], /承辦擬稿/);
-});
-await t('parseFlow：打不出箭頭時 -> 與 ^ 也認得', () => {
-  const p = DD.parseFlow('步驟 甲\n判斷 乙？\n  否 -> 丙\n  是 ^ 甲');
-  assert.equal(p.nodes[1].branch.text.main, '丙');
-  assert.equal(p.nodes[1].loop.index, 0);
-});
-await t('parseFlow：項目符號當縮排也算', () => {
-  const p = DD.parseFlow('判斷 乙？\n- 否 → 丙');
-  assert.equal(p.nodes[0].branch.text.main, '丙');
-});
-await t('parseFlow：分支沒接在判斷底下要講清楚', () => {
-  const p = DD.parseFlow('步驟 甲\n  否 → 乙');
-  assert.equal(p.nodes.length, 1);
-  assert.match(p.warnings[0], /要接在「判斷」底下/);
-});
-await t('parseFlow：縮排那行看不懂時要講怎麼寫才對', () => {
-  const p = DD.parseFlow('判斷 乙？\n  隨便亂打');
-  assert.match(p.warnings[0], /否 → 移文他科/);
-});
-await t('parseFlow：同一個判斷只收一條往右、一條退回', () => {
-  const p = DD.parseFlow('步驟 甲\n判斷 乙？\n  否 → 丙\n  否 → 丁\n  是 ↑ 甲\n  是 ↑ 甲');
-  assert.equal(p.nodes[1].branch.text.main, '丙');
-  assert.equal(p.warnings.length, 2);
-});
-await t('parseFlow：空行與空白行跳過，不會生出空節點', () => {
-  const p = DD.parseFlow('\n步驟 甲\n\n   \n步驟 乙\n');
-  assert.equal(p.nodes.length, 2);
-});
-await t('parseFlow：只寫形狀沒寫內容時提醒，不畫空方塊', () => {
-  const p = DD.parseFlow('步驟');
-  assert.equal(p.nodes.length, 0);
-  assert.match(p.warnings[0], /只有形狀沒有內容/);
-});
-await t('parseFlow：空字串不會爆', () => {
-  assert.deepEqual(DD.parseFlow('').nodes, []);
-  assert.deepEqual(DD.parseFlow(null).nodes, []);
-});
+const fnode = (kind, main, extra) =>
+  Object.assign({ kind, main, sub: '', branch: null, loop: null, downLabel: '', branchEnds: false },
+    extra || {});
+
 await t('flowOpposite：是↔否 這種成對的才自動標，其他留空', () => {
   assert.equal(DD.flowOpposite('是'), '否');
   assert.equal(DD.flowOpposite('否'), '是');
   assert.equal(DD.flowOpposite('隨便'), '');
 });
 
-await t('layoutFlow：節點由上往下排，不重疊', () => {
-  const p = DD.parseFlow(DD.FLOW_EXAMPLE);
-  const lay = DD.layoutFlow(p.nodes);
-  assert.equal(lay.items.length, p.nodes.length);
-  for (let i = 1; i < lay.items.length; i++) {
-    assert.ok(lay.items[i].top > lay.items[i - 1].bottom,
-      `第 ${i} 格疊到第 ${i - 1} 格了`);
-  }
-  assert.ok(lay.height > lay.items[lay.items.length - 1].bottom);
+await t('splitFlowText：斜線後面是副標，全形半形都收', () => {
+  assert.deepEqual(DD.splitFlowText('登記收文 / 收發室'), { main: '登記收文', sub: '收發室' });
+  assert.deepEqual(DD.splitFlowText('擬稿 ／ 附法令'), { main: '擬稿', sub: '附法令' });
+  assert.deepEqual(DD.splitFlowText('只有主文'), { main: '只有主文', sub: '' });
 });
+
+await t('layoutFlow：主線由上往下排，不重疊', () => {
+  const lay = DD.layoutFlow([fnode('start', '甲'), fnode('step', '乙'), fnode('end', '丙')]);
+  assert.equal(lay.items.length, 3);
+  lay.items.forEach((it, i) => {
+    assert.equal(it.col, 'main');
+    if (i) assert.ok(it.top > lay.items[i - 1].bottom, '第 ' + (i + 1) + ' 格疊到前一格');
+  });
+  assert.ok(lay.height > lay.items[2].bottom);
+});
+
 await t('layoutFlow：字多的方塊會變高（不然字會爆出框）', () => {
-  const short = DD.layoutFlow(DD.parseFlow('步驟 甲').nodes).items[0];
-  const long = DD.layoutFlow(DD.parseFlow('步驟 ' + '很長的中文字'.repeat(6)).nodes).items[0];
-  assert.ok(long.h > short.h, `${long.h} 應該大於 ${short.h}`);
-  assert.ok(long.lines.length > 1);
+  const short = DD.layoutFlow([fnode('step', '甲')]).items[0];
+  const long = DD.layoutFlow([fnode('step', '這是一段刻意寫得非常長的步驟名稱用來把方塊撐高')]).items[0];
+  assert.ok(long.h > short.h, short.h + ' vs ' + long.h);
+});
+
+await t('layoutFlow：分支步驟排在右邊那一欄，第一格跟判斷同高', () => {
+  const lay = DD.layoutFlow([
+    fnode('decision', '要不要？'), fnode('branch', '不要就這樣'), fnode('step', '要就繼續')
+  ]);
+  const [dec, side, main] = lay.items;
+  assert.equal(side.col, 'side');
+  assert.ok(side.cx > dec.cx, '分支沒有排在右邊');
+  assert.equal(Math.round(side.cy), Math.round(dec.cy), '分支第一格沒有跟判斷同高');
+  assert.equal(side.owner, 0);
+  assert.equal(main.col, 'main');
+});
+
+await t('layoutFlow：分支走好幾步時，主線讓到分支底下（匯回線要有地方走）', () => {
+  const lay = DD.layoutFlow([
+    fnode('decision', '要不要？'),
+    fnode('branch', '甲'), fnode('branch', '乙'), fnode('branch', '丙'),
+    fnode('step', '匯回這裡')
+  ]);
+  const side = lay.items.filter((i) => i.col === 'side');
+  const target = lay.items[lay.items.length - 1];
+  assert.equal(side.length, 3);
+  side.forEach((s, i) => { if (i) assert.ok(s.top > side[i - 1].bottom, '分支自己疊在一起'); });
+  assert.ok(target.top > side[side.length - 1].bottom, '主線沒有讓到分支底下');
+});
+
+await t('layoutFlow：分支接不到判斷時就當主線畫，不會掉到 side 欄', () => {
+  const lay = DD.layoutFlow([fnode('step', '甲'), fnode('branch', '乙')]);
+  assert.equal(lay.items[1].col, 'main');
+});
+
+await t('flowMainIndexes：只回主線那幾格', () => {
+  const lay = DD.layoutFlow([
+    fnode('decision', '甲'), fnode('branch', '乙'), fnode('step', '丙')
+  ]);
+  assert.deepEqual(DD.flowMainIndexes(lay.items), [0, 2]);
 });
 
 await t('renderFlowSvg：畫得出完整的一張 svg', () => {
-  const svg = DD.renderFlowSvg(DD.parseFlow(DD.FLOW_EXAMPLE));
-  assert.ok(svg.startsWith('<svg '));
-  assert.ok(svg.endsWith('</svg>'));
-  assert.ok(DD.parseViewBox(svg), '沒有 viewBox 就組不出匯出檔');
-  ['收到來文', '移文他科', '發文並歸檔'].forEach((w) => assert.ok(svg.includes(w), w));
+  const svg = DD.renderFlowSvg({ nodes: [fnode('start', '收到來文'), fnode('end', '發文')] }, {});
+  assert.match(svg, /^<svg[\s\S]*<\/svg>$/);
+  assert.match(svg, /viewBox="0 0 1000 \d+"/);
+  assert.ok(svg.includes('收到來文') && svg.includes('發文'));
 });
+
 await t('renderFlowSvg：判斷是菱形、起訖是圓角、退回是虛線', () => {
-  const svg = DD.renderFlowSvg(DD.parseFlow(DD.FLOW_EXAMPLE));
-  assert.ok(svg.includes('<polygon points='), '沒有菱形');
-  assert.match(svg, /rx="2[0-9]/, '起訖沒有畫成橢圓');
-  assert.ok(svg.includes('stroke-dasharray'), '退回線沒有畫成虛線');
+  const svg = DD.renderFlowSvg({
+    nodes: [
+      fnode('start', '甲'),
+      fnode('decision', '乙？', { loop: { label: '是', target: '甲', index: 0 } })
+    ]
+  }, {});
+  assert.ok(svg.includes('<polygon'), '沒有菱形');
+  assert.match(svg, /rx="\d/, '沒有圓角');
+  assert.ok(svg.includes('stroke-dasharray'), '退回線不是虛線');
 });
-await t('renderFlowSvg：只標一條分支，往下那條自動標相反的', () => {
-  const svg = DD.renderFlowSvg(DD.parseFlow('判斷 要嗎？\n  否 → 結案\n步驟 續辦'));
-  assert.ok(svg.includes('>否<'));
-  assert.ok(svg.includes('>是<'), '往下走的那條沒有自動標「是」');
+
+await t('renderFlowSvg：分支走完會有一條匯回主線的線，勾了不回主線就沒有', () => {
+  const nodes = () => [
+    fnode('decision', '要不要？'), fnode('branch', '不要'), fnode('step', '匯回這裡')
+  ];
+  const joined = DD.renderFlowSvg({ nodes: nodes() }, {});
+  const ends = nodes();
+  ends[0].branchEnds = true;
+  const cut = DD.renderFlowSvg({ nodes: ends }, {});
+  /* 匯流點是半徑 2.6 的實心點；網點底圖也用 circle，所以要指名半徑才問得準 */
+  assert.ok(joined.includes('r="2.6"'), '沒有畫匯流點');
+  assert.ok(!cut.includes('r="2.6"'), '勾了不回主線還是畫了匯回線');
 });
+
+await t('renderFlowSvg：往下那條線的字，使用者填了就照填的，沒填才自動標相反的', () => {
+  const auto = DD.renderFlowSvg({
+    nodes: [fnode('decision', '甲？', { branch: { label: '否' } }), fnode('step', '乙')]
+  }, {});
+  assert.ok(auto.includes('>是<'), '沒有自動標成相反的');
+  const manual = DD.renderFlowSvg({
+    nodes: [fnode('decision', '甲？', { branch: { label: '否' }, downLabel: '通過' }), fnode('step', '乙')]
+  }, {});
+  assert.ok(manual.includes('>通過<'), '沒有照使用者填的標');
+});
+
 await t('renderFlowSvg：顏色用上游那四個色票，換配色才吃得到', () => {
-  const svg = DD.renderFlowSvg(DD.parseFlow(DD.FLOW_EXAMPLE));
+  const svg = DD.renderFlowSvg({ nodes: [fnode('start', '甲'), fnode('end', '乙')] }, {});
   assert.ok(svg.includes(DD.UPSTREAM_LIGHT.paper));
   assert.ok(svg.includes(DD.UPSTREAM_LIGHT.ink));
-  assert.ok(svg.includes(DD.UPSTREAM_LIGHT.accent), '最後一個節點沒有用強調色');
-  const after = DD.applyPalette(svg, DD.UPSTREAM_LIGHT, DD.paletteById('gongwu').light);
-  assert.ok(after.includes('#f3f1e9'), '換不到工具箱的暖紙底');
+  assert.ok(svg.includes(DD.UPSTREAM_LIGHT.accent));
 });
+
 await t('renderFlowSvg：使用者打的角括號會被轉義，不會變成標籤', () => {
-  const svg = DD.renderFlowSvg(DD.parseFlow('步驟 <script>alert(1)</script>'));
-  assert.ok(!svg.includes('<script'));
+  const svg = DD.renderFlowSvg({ nodes: [fnode('step', '<script>x</script>')] }, {});
+  assert.ok(!svg.includes('<script>'));
   assert.ok(svg.includes('&lt;script&gt;'));
 });
-await t('renderFlowSvg：大綱空的時候畫一張說明用的空圖，不是壞掉的 svg', () => {
-  const svg = DD.renderFlowSvg(DD.parseFlow(''));
-  assert.ok(DD.parseViewBox(svg));
-  assert.ok(svg.includes('大綱框'));
+
+await t('renderFlowSvg：一個節點都沒有時畫一張說明用的空圖，不是壞掉的 svg', () => {
+  const svg = DD.renderFlowSvg({ nodes: [] }, {});
+  assert.match(svg, /^<svg[\s\S]*<\/svg>$/);
+  assert.ok(svg.includes('左邊'));
 });
+
 await t('renderFlowSvg：產出的字族是本機字族，沒有 webfont', () => {
-  const svg = DD.renderFlowSvg(DD.parseFlow(DD.FLOW_EXAMPLE));
-  assert.ok(!/Geist|Instrument/.test(svg));
-  assert.ok(svg.includes('Noto Sans TC'));
-  assert.deepEqual(svg.match(/https?:\/\/(?!www\.w3\.org)/g), null, '不該有對外網址');
+  const svg = DD.renderFlowSvg({ nodes: [fnode('step', '甲')] }, {});
+  /* xmlns 是命名空間識別字，不是連線，要排除掉才問得準 */
+  const links = svg.replace(/xmlns(:\w+)?="[^"]*"/g, '');
+  assert.ok(!/@import|https?:\/\//.test(links), '產出的 SVG 有對外連線');
+  assert.ok(svg.includes('Noto Sans TC') || svg.includes('system-ui'), '不是本機字族');
 });
-await t('內建範例是一份真的公文流程，而且自己解得開、沒有警告', () => {
-  const p = DD.parseFlow(DD.FLOW_EXAMPLE);
-  assert.deepEqual(p.warnings, []);
-  assert.ok(p.nodes.length >= 8);
-  assert.ok(p.nodes.some((n) => n.kind === 'decision' && n.branch));
-  assert.ok(p.nodes.some((n) => n.loop));
+
+/* ── .docx：Word 開得起來，圖還能轉成可編輯的圖案 ──────────────────── */
+
+await t('crc32：對得上已知值', () => {
+  assert.equal(DD.crc32(new TextEncoder().encode('123456789')), 0xCBF43926);
+  assert.equal(DD.crc32(new Uint8Array(0)), 0);
+});
+
+await t('zipStore：組出來的是合法 ZIP（有本地檔頭與中央目錄）', () => {
+  const enc = new TextEncoder();
+  const z = DD.zipStore([{ name: 'a.txt', bytes: enc.encode('hello') }]);
+  assert.equal(z[0], 0x50); assert.equal(z[1], 0x4b);
+  const tail = Array.from(z.slice(-22, -18));
+  assert.deepEqual(tail, [0x50, 0x4b, 0x05, 0x06], '沒有中央目錄結尾');
+  assert.ok(z.length > 5 + 30 + 46);
+});
+
+await t('zipStore：同樣的內容壓出同樣的位元組（時間固定成 1980-01-01）', () => {
+  const enc = new TextEncoder();
+  const a = DD.zipStore([{ name: 'a.txt', bytes: enc.encode('hello') }]);
+  const b = DD.zipStore([{ name: 'a.txt', bytes: enc.encode('hello') }]);
+  assert.deepEqual(Array.from(a), Array.from(b));
+});
+
+await t('buildDocx：該有的六個檔案都在，而且關聯指得到', () => {
+  const bytes = DD.buildDocx({ svg: '<svg viewBox="0 0 100 50"></svg>', png: new Uint8Array([1, 2, 3]), w: 100, h: 50, title: '測試圖' });
+  const text = Buffer.from(bytes).toString('latin1');
+  ['[Content_Types].xml', '_rels/.rels', 'word/document.xml',
+    'word/_rels/document.xml.rels', 'word/media/image1.png', 'word/media/image1.svg']
+    .forEach((n) => assert.ok(text.includes(n), '少了 ' + n));
+});
+
+await t('buildDocx：圖是以 SVG 放進去的（Word 才轉得成可編輯的圖案）', () => {
+  const bytes = DD.buildDocx({ svg: '<svg viewBox="0 0 100 50"><text>甲</text></svg>', png: new Uint8Array(0), w: 100, h: 50 });
+  const text = Buffer.from(bytes).toString('utf8');
+  assert.ok(text.includes('asvg:svgBlip'), '沒有 SVG 擴充，Word 只會看到圖片');
+  assert.ok(text.includes('r:embed="rId2"'), 'SVG 沒有掛上關聯');
+  assert.ok(text.includes('轉換成圖形'), '沒有告訴使用者怎麼把圖變成可編輯的');
+});
+
+await t('buildDocx：帶著來源標註（授權要求）', () => {
+  const bytes = DD.buildDocx({ svg: '<svg viewBox="0 0 10 10"></svg>', png: new Uint8Array(0), w: 10, h: 10 });
+  assert.ok(Buffer.from(bytes).toString('utf8').includes('cathrynlavery/diagram-design'));
+});
+
+await t('buildDocx：標題裡的角括號會被轉義，不會弄壞 XML', () => {
+  const bytes = DD.buildDocx({ svg: '<svg viewBox="0 0 10 10"></svg>', png: new Uint8Array(0), w: 10, h: 10, title: '<壞>&' });
+  const text = Buffer.from(bytes).toString('utf8');
+  assert.ok(text.includes('&lt;壞&gt;&amp;'));
+  assert.ok(!text.includes('name="<壞>'));
+});
+
+await t('buildDocx：圖太寬時縮到 A4 版面寬度，不會撐出頁面', () => {
+  const wide = DD.buildDocx({ svg: '<svg viewBox="0 0 4000 1000"></svg>', png: new Uint8Array(0), w: 4000, h: 1000 });
+  const cx = +/wp:extent cx="(\d+)"/.exec(Buffer.from(wide).toString('utf8'))[1];
+  assert.ok(cx <= 628 * 9525 + 10, 'cx=' + cx);
+  const small = DD.buildDocx({ svg: '<svg viewBox="0 0 200 100"></svg>', png: new Uint8Array(0), w: 200, h: 100 });
+  const cx2 = +/wp:extent cx="(\d+)"/.exec(Buffer.from(small).toString('utf8'))[1];
+  assert.equal(cx2, 200 * 9525, '小圖不該被放大');
 });
 
 /* ── 分類與篩選 ──────────────────────────────────────────────────── */

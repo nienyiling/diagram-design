@@ -23,7 +23,8 @@
     ['stage', 'edKind', 'edHeading', 'edUse', 'edEyebrow', 'edTitleIn', 'paletteSel', 'scaleSel',
       'fontSel', 'fitChk', 'zhChk', 'zhRow', 'zhNote', 'textList', 'textCount',
       'pasteBox', 'pasteBtn', 'pasteErr', 'copyPngBtn', 'saveProjBtn', 'loadProjInput', 'textCard',
-      'dlPng', 'dlSvg', 'dlHtml', 'resetBtn', 'projBox', 'edErr', 'edOk', 'dlErr', 'pngNote', 'swatches']
+      'dlPng', 'dlSvg', 'dlHtml', 'dlDocx', 'resetBtn', 'projBox', 'pickHint',
+      'edErr', 'edOk', 'dlErr', 'pngNote', 'swatches']
       .forEach(function (id) { el[id] = $(id); });
   }
 
@@ -294,6 +295,40 @@
     }
   }
 
+  /**
+   * .docx：Word 開得起來，而且圖是 SVG——使用者在 Word 裡按右鍵「轉換成圖形」
+   * 就能把整張圖變成可以拖、可以改字的 Word 圖案。這才是「可編輯的 Word」。
+   * 同時放一份 PNG 當後備，舊版 Word 與 LibreOffice 看不懂 SVG 時才不會開出一個空白框。
+   */
+  function saveDocx() {
+    show(el.dlErr, '');
+    show(el.edOk, '');
+    var svg = composed();
+    var box = DD.parseViewBox(svg) || { w: state.d.w, h: state.d.h };
+    makePng().then(function (r) {
+      return r.blob.arrayBuffer().then(function (buf) {
+        return { png: new Uint8Array(buf), w: r.w, h: r.h };
+      });
+    }).catch(function () {
+      /* 這張圖轉不出 PNG（例如用到 foreignObject）也還是要給得出 .docx，
+         只是舊版 Word 會看到空白——總比按了沒反應好 */
+      return { png: new Uint8Array(0), w: 0, h: 0 };
+    }).then(function (r) {
+      var bytes = DD.buildDocx({
+        svg: svg, png: r.png, w: box.w, h: box.h,
+        title: el.edTitleIn.value.trim() || state.d.typeZh || '圖表'
+      });
+      download(new Blob([bytes], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      }), DD.safeFilename(baseName(), 'docx'));
+      show(el.edOk, r.png.length
+        ? '已下載 Word 檔。在 Word 裡對圖按右鍵 →「轉換成圖形」，就能拖方塊、改文字。'
+        : '已下載 Word 檔（這張圖轉不出後備圖片，Word 2016 以下可能看不到圖，請改用 SVG）。');
+    }).catch(function (e) {
+      show(el.dlErr, '產生 Word 檔時出錯（' + e.message + '），請改用 SVG 或 PNG 下載。');
+    });
+  }
+
   function saveHtml() {
     show(el.dlErr, '');
     try {
@@ -467,19 +502,23 @@
 
   /* ── 對外介面 ────────────────────────────────────────────────────── */
 
+  /** 回傳 true 表示這一次真的填了（之後才好設預設值，不會蓋掉使用者選過的）。 */
   function fillSelect(node, items) {
-    if (node.options.length) return;
+    if (node.options.length) return false;
     items.forEach(function (it) {
       var o = document.createElement('option');
       o.value = it.id;
       o.textContent = it.name;
       node.appendChild(o);
     });
+    return true;
   }
 
   function fillPalettes() {
     fillSelect(el.paletteSel, DD.PALETTES);
-    fillSelect(el.fontSel, DD.FONT_CHOICES);
+    /* 字體預設標楷體：這裡做出來的圖多半是要貼進公文的，公文就是標楷體。
+       沒裝標楷體的機器（Mac、Linux）會照字族堆疊退回明體，不會變成方塊。 */
+    if (fillSelect(el.fontSel, DD.FONT_CHOICES)) el.fontSel.value = 'kai';
   }
 
   function renderSwatches() {
@@ -513,7 +552,7 @@
       units: [],
       selected: null,
       paletteId: el.paletteSel.value || 'source',
-      font: el.fontSel.value || 'source',
+      font: el.fontSel.value || 'kai',
       fit: el.fitChk.checked,
       /* 有中文就預設先套上——使用者要的是中文的圖，原文只是備而不用 */
       zhOn: hasZh,
@@ -533,6 +572,8 @@
     el.textCard.hidden = state.flow;
     /* 產生器畫出來的圖本來就是中文，沒有「中文層」可言——那段說明留著只會讓人以為壞了 */
     if (state.flow) { el.zhRow.hidden = true; el.zhNote.textContent = ''; }
+    /* 產生器沒有逐段清單，「點圖上的文字」那句話對它是假的 */
+    el.pickHint.hidden = state.flow;
 
     el.edKind.textContent = diagram.typeZh + '　' + diagram.variantZh;
     el.edHeading.textContent = state.flow
@@ -614,6 +655,7 @@
     el.dlPng.addEventListener('click', savePng);
     el.dlSvg.addEventListener('click', saveSvg);
     el.dlHtml.addEventListener('click', saveHtml);
+    el.dlDocx.addEventListener('click', saveDocx);
     el.resetBtn.addEventListener('click', function () {
       if (!state) return;
       state.edits = {};

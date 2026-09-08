@@ -842,6 +842,169 @@
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + String(svg) + '\n';
   }
 
+  /* ── .docx：Word 打得開，而且圖可以「轉換成圖形」變成能拖能改字的圖案 ──
+   *
+   * 做法是包一份 OOXML，圖片同時放 SVG 與 PNG 兩份：
+   *   - Word 2016／Microsoft 365 看得懂 SVG（a:blip 底下的 asvg:svgBlip 擴充），
+   *     使用者在 Word 裡對圖按右鍵 →「轉換成圖形」，整張圖就變成 Word 的圖案群組，
+   *     可以拖、可以改字。這是這個功能存在的理由——貼一張 PNG 進去誰都會。
+   *   - 舊版 Word 與 LibreOffice 看不懂 SVG，就顯示那份 PNG。所以兩份都要放，
+   *     不能只放 SVG（那會變成一個空白框，而且畫面上完全看不出哪裡錯了）。
+   *
+   * ZIP 一律用 store（不壓縮）。docx 允許 store，而且省掉一整包 deflate——
+   * 這個站的鐵律是零相依，為了少幾百 KB 去長一個壓縮器不划算。
+   */
+
+  var CRC_TABLE = null;
+  function crcTable() {
+    if (CRC_TABLE) return CRC_TABLE;
+    CRC_TABLE = new Int32Array(256);
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      CRC_TABLE[n] = c;
+    }
+    return CRC_TABLE;
+  }
+
+  function crc32(bytes) {
+    var t = crcTable();
+    var c = -1;
+    for (var i = 0; i < bytes.length; i++) c = t[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ -1) >>> 0;
+  }
+
+  function utf8Bytes(str) {
+    if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(str);
+    /* Node 沒有 TextEncoder 的舊版本，測試環境也要跑得動 */
+    var out = [], s = unescape(encodeURIComponent(String(str)));
+    for (var i = 0; i < s.length; i++) out.push(s.charCodeAt(i) & 0xFF);
+    return new Uint8Array(out);
+  }
+
+  /** 只做 store 的 ZIP。entries 是 [{name, bytes}]。回傳 Uint8Array。 */
+  function zipStore(entries) {
+    var chunks = [], central = [], offset = 0;
+    function u16(v) { return [v & 0xFF, (v >>> 8) & 0xFF]; }
+    function u32(v) { return [v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF]; }
+
+    entries.forEach(function (e) {
+      var nameBytes = utf8Bytes(e.name);
+      var crc = crc32(e.bytes);
+      var size = e.bytes.length;
+      /* 時間固定成 1980-01-01：同樣的內容壓出同樣的位元組，測得起來 */
+      var head = [].concat(
+        u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(0), u16(33),
+        u32(crc), u32(size), u32(size), u16(nameBytes.length), u16(0));
+      chunks.push(new Uint8Array(head), nameBytes, e.bytes);
+      central.push({ name: nameBytes, crc: crc, size: size, offset: offset });
+      offset += head.length + nameBytes.length + size;
+    });
+
+    var dirStart = offset, dirLen = 0;
+    central.forEach(function (c) {
+      var head = [].concat(
+        u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(0), u16(33),
+        u32(c.crc), u32(c.size), u32(c.size),
+        u16(c.name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(c.offset));
+      chunks.push(new Uint8Array(head), c.name);
+      dirLen += head.length + c.name.length;
+    });
+    chunks.push(new Uint8Array([].concat(
+      u32(0x06054b50), u16(0), u16(0), u16(central.length), u16(central.length),
+      u32(dirLen), u32(dirStart), u16(0))));
+
+    var total = chunks.reduce(function (n, c) { return n + c.length; }, 0);
+    var out = new Uint8Array(total), at = 0;
+    chunks.forEach(function (c) { out.set(c, at); at += c.length; });
+    return out;
+  }
+
+  var EMU = 9525;   /* 1 px = 9525 EMU */
+
+  /**
+   * 組一份 .docx。
+   *   opts.svg    整份 SVG 字串（已經含標題與來源標註）
+   *   opts.png    Uint8Array，給看不懂 SVG 的 Word 當後備
+   *   opts.w／h   圖的原始寬高（px），用來換算 Word 裡的顯示尺寸
+   *   opts.title  文件標題，也是圖片的替代文字
+   * 回傳 Uint8Array。
+   */
+  function buildDocx(opts) {
+    var o = opts || {};
+    var title = String(o.title || '圖表');
+    var w = Math.max(1, o.w || 1000), h = Math.max(1, o.h || 600);
+    /* A4 直向、預設邊界之下可用寬度約 16.6 公分＝約 628 px */
+    var pageW = 628;
+    var scale = Math.min(1, pageW / w);
+    var cx = Math.round(w * scale * EMU), cy = Math.round(h * scale * EMU);
+
+    var docXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
+      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
+      'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" ' +
+      'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
+      'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
+      '<w:body>' +
+      '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing>' +
+      '<wp:inline distT="0" distB="0" distL="0" distR="0">' +
+      '<wp:extent cx="' + cx + '" cy="' + cy + '"/>' +
+      '<wp:docPr id="1" name="' + escapeXml(title) + '" descr="' + escapeXml(title) + '"/>' +
+      '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
+      '<pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="' + escapeXml(title) + '"/><pic:cNvPicPr/></pic:nvPicPr>' +
+      '<pic:blipFill><a:blip r:embed="rId1"><a:extLst>' +
+      '<a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}">' +
+      '<asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="rId2"/>' +
+      '</a:ext></a:extLst></a:blip><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' +
+      '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + cx + '" cy="' + cy + '"/></a:xfrm>' +
+      '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>' +
+      '</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>' +
+      /* 使用者一打開就看得到怎麼把圖變成可編輯的——不然沒人知道有這個功能 */
+      '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>' +
+      '<w:rFonts w:ascii="DFKai-SB" w:eastAsia="標楷體" w:hAnsi="DFKai-SB"/>' +
+      '<w:sz w:val="18"/><w:color w:val="7F7F7F"/></w:rPr>' +
+      '<w:t xml:space="preserve">要修改圖上的方塊或文字：在圖片上按右鍵 →「轉換成圖形」' +
+      '（Word 2016 以上），圖就會變成可以拖、可以改字的 Word 圖案。</w:t></w:r></w:p>' +
+      '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>' +
+      '<w:rFonts w:ascii="DFKai-SB" w:eastAsia="標楷體" w:hAnsi="DFKai-SB"/>' +
+      '<w:sz w:val="16"/><w:color w:val="A6A6A6"/></w:rPr>' +
+      '<w:t xml:space="preserve">' + escapeXml(SOURCE.credit) + '</w:t></w:r></w:p>' +
+      '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>' +
+      '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" ' +
+      'w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>' +
+      '</w:body></w:document>';
+
+    var rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>' +
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.svg"/>' +
+      '</Relationships>';
+
+    var rootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+      '</Relationships>';
+
+    var contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Default Extension="png" ContentType="image/png"/>' +
+      '<Default Extension="svg" ContentType="image/svg+xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '</Types>';
+
+    var png = o.png && o.png.length ? o.png : new Uint8Array(0);
+    return zipStore([
+      { name: '[Content_Types].xml', bytes: utf8Bytes(contentTypes) },
+      { name: '_rels/.rels', bytes: utf8Bytes(rootRels) },
+      { name: 'word/document.xml', bytes: utf8Bytes(docXml) },
+      { name: 'word/_rels/document.xml.rels', bytes: utf8Bytes(rels) },
+      { name: 'word/media/image1.png', bytes: png },
+      { name: 'word/media/image1.svg', bytes: utf8Bytes(svgFile(String(o.svg || ''))) }
+    ]);
+  }
+
   /** 組一份自足的 HTML：零外部請求，用瀏覽器列印就能出 PDF。 */
   function buildStandaloneHtml(opts) {
     var o = opts || {};
@@ -872,24 +1035,6 @@
     return (base || '圖表') + '.' + ext;
   }
 
-  /* ══ 流程圖產生器 ═══════════════════════════════════════════════════
-     範本庫只能換掉別人排好的字，不能決定「我要幾個步驟、幾個判斷、往哪裡分岔」。
-     這一段是真的產生器：使用者打大綱，程式自己算方塊大小、位置與連線。
-
-     大綱語法刻意只有三件事要記：
-       每一行就是一個節點：`步驟 登記收文 / 收發室`（斜線後面是小字副標）
-       開頭的詞決定形狀：開始、結束＝橢圓；判斷＝菱形；其餘一律是矩形步驟
-       判斷底下縮排一行就是分支：`否 → 移文他科`（往右）、`是 ↑ 承辦人擬稿`（退回前面某一步）
-
-     分出去的那條標了什麼，往下走的那條就自動標相反的那個（是↔否），
-     這樣使用者只要寫一行，兩條線都有標籤。 */
-
-  var FLOW_KEYWORDS = {
-    '開始': 'start', '起點': 'start', '起始': 'start', '收件': 'start',
-    '結束': 'end', '終點': 'end', '結果': 'end', '完成': 'end',
-    '判斷': 'decision', '決策': 'decision', '判定': 'decision', '問': 'decision',
-    '步驟': 'step', '作業': 'step', '處理': 'step'
-  };
 
   /** 是↔否、Y↔N 這種成對的標籤，用來自動標往下走的那一條線。 */
   var FLOW_OPPOSITE = { '是': '否', '否': '是', 'Y': 'N', 'N': 'Y', '有': '無', '無': '有',
@@ -905,90 +1050,10 @@
     return { main: (m[0] || '').trim(), sub: (m[1] || '').trim() };
   }
 
-  /**
-   * 讀大綱，切成節點。看不懂的行不會靜靜吞掉，一律回報在 warnings 裡——
-   * 使用者打錯字時要看得到「第 3 行看不懂」，而不是圖上少一塊還不知道為什麼。
-   */
-  function parseFlow(text) {
-    var lines = String(text == null ? '' : text).split(/\r\n|\r|\n/);
-    var nodes = [];
-    var warnings = [];
-
-    lines.forEach(function (raw, i) {
-      var lineNo = i + 1;
-      if (!raw.trim()) return;
-      /* 縮排（半形空白、tab、全形空白）或項目符號開頭＝這是上一個判斷的分支 */
-      var indented = /^[ \t　]+|^\s*[-‧•·]\s+/.test(raw);
-      var line = raw.replace(/^[\s　]+/, '').replace(/^[-‧•·]\s*/, '').trim();
-      if (!line) return;
-
-      if (indented) {
-        var last = nodes[nodes.length - 1];
-        if (!last || last.kind !== 'decision') {
-          warnings.push('第 ' + lineNo + ' 行：縮排的分支要接在「判斷」底下，這一行上面不是判斷。');
-          return;
-        }
-        var br = line.match(/^(.{1,6}?)\s*(→|->|=>|↑|\^)\s*(.+)$/);
-        if (!br) {
-          warnings.push('第 ' + lineNo + ' 行看不懂：分支要寫成「否 → 移文他科」或「是 ↑ 承辦人擬稿」。');
-          return;
-        }
-        var label = br[1].trim();
-        var arrow = br[2];
-        var target = br[3].trim();
-        if (/[↑^]/.test(arrow)) {
-          if (last.loop) { warnings.push('第 ' + lineNo + ' 行：同一個判斷只能有一條退回線。'); return; }
-          last.loop = { label: label, target: target, line: lineNo };
-        } else {
-          if (last.branch) { warnings.push('第 ' + lineNo + ' 行：同一個判斷只能有一條往右的分支。'); return; }
-          last.branch = { label: label, text: splitFlowText(target), line: lineNo };
-        }
-        return;
-      }
-
-      /* 主節點：開頭的詞決定形狀，沒寫就是步驟 */
-      var head = line.match(/^(\S+?)[\s　]+(.+)$/);
-      var kind = 'step';
-      var body = line;
-      if (head && Object.prototype.hasOwnProperty.call(FLOW_KEYWORDS, head[1])) {
-        kind = FLOW_KEYWORDS[head[1]];
-        body = head[2];
-      } else if (Object.prototype.hasOwnProperty.call(FLOW_KEYWORDS, line)) {
-        /* 整行就只有一個形狀關鍵字：使用者是打到一半，不是想畫一個叫「步驟」的方塊 */
-        body = '';
-      }
-      var t = splitFlowText(body);
-      if (!t.main) {
-        warnings.push('第 ' + lineNo + ' 行只有形狀沒有內容，跳過了。');
-        return;
-      }
-      nodes.push({ kind: kind, main: t.main, sub: t.sub, line: lineNo, branch: null, loop: null });
-    });
-
-    /* 退回線要指得到前面某一個節點，指不到就講清楚是哪一行、打了什麼 */
-    nodes.forEach(function (n, idx) {
-      if (!n.loop) return;
-      var found = -1;
-      for (var j = 0; j < idx; j++) {
-        if (nodes[j].main === n.loop.target) { found = j; break; }
-      }
-      if (found < 0) {
-        warnings.push('第 ' + n.loop.line + ' 行的退回目標「' + n.loop.target +
-          '」在前面找不到，要跟前面某一步的文字一模一樣。');
-        n.loop = null;
-      } else {
-        n.loop.index = found;
-      }
-    });
-
-    return { nodes: nodes, warnings: warnings };
-  }
-
-  /* 版面常數。跟範本庫同一套視覺：1000 寬、主幹置中、右邊留給分支。 */
   var FLOW = {
     W: 1000, cx: 500, top: 44, gap: 44,
     boxW: 220, ovalW: 200, diaW: 210, diaH: 104,
-    sideX: 700, sideW: 200, sideH: 52,
+    sideX: 700, sideW: 200, sideH: 52, sideGap: 30,
     loopX: 150,
     fs: 13, fsSub: 9.5, fsLabel: 9.5, lineH: 17
   };
@@ -996,6 +1061,7 @@
   function flowNodeWidth(n) {
     if (n.kind === 'start' || n.kind === 'end') return FLOW.ovalW;
     if (n.kind === 'decision') return FLOW.diaW;
+    if (n.kind === 'branch') return FLOW.sideW;
     return FLOW.boxW;
   }
 
@@ -1014,17 +1080,67 @@
     return { w: w, h: h, lines: lines };
   }
 
-  /** 算出每個節點的位置與大小。分開算是為了測得到——版面錯了要看得出來是哪一格。 */
+  /**
+   * 算出每個節點的位置與大小。分開算是為了測得到——版面錯了要看得出來是哪一格。
+   *
+   * 兩欄：主線在中間（col 'main'），判斷拉出去的分支步驟在右邊（col 'side'）。
+   * 分支可以連走好幾步再匯回主線——真實的公文流程幾乎都是這樣，
+   * 「分岔出去只有一格」是畫不出來的。
+   *
+   * 匯回點就是分支步驟之後的第一個主線節點；主線會讓到分支底下再放那一格，
+   * 匯回線才有地方走。分支勾了「不回主線」就不畫匯回線，最後一格畫成圓角收尾。
+   */
   function layoutFlow(nodes) {
-    var y = FLOW.top;
-    var placed = nodes.map(function (n) {
+    var mainY = FLOW.top;
+    var sideY = null;          /* 目前這條分支下一格要放的 y；null＝現在沒有分支在跑 */
+    var ownerIdx = null;       /* 這條分支屬於哪一個判斷 */
+    var armedIdx = null;       /* 最近一個判斷，還沒長出分支 */
+    var items = [];
+
+    nodes.forEach(function (n) {
       var b = flowNodeBox(n);
-      var item = { n: n, w: b.w, h: b.h, lines: b.lines, cy: y + b.h / 2, top: y, bottom: y + b.h };
-      y = item.bottom + FLOW.gap;
-      return item;
+      if (n.kind === 'branch' && (sideY != null || armedIdx != null)) {
+        if (sideY == null) {
+          /* 這條分支的第一格：跟判斷同高，橫線才拉得平 */
+          ownerIdx = armedIdx;
+          armedIdx = null;
+          sideY = items[ownerIdx].cy - b.h / 2;
+        }
+        var side = {
+          n: n, col: 'side', owner: ownerIdx, w: b.w, h: b.h, lines: b.lines,
+          top: sideY, bottom: sideY + b.h, cy: sideY + b.h / 2, cx: FLOW.sideX + FLOW.sideW / 2
+        };
+        items.push(side);
+        sideY = side.bottom + FLOW.sideGap;
+        return;
+      }
+
+      /* 主線。分支還在跑的話，先讓到它底下——匯回線要有地方走 */
+      if (sideY != null) {
+        mainY = Math.max(mainY, sideY);
+        sideY = null;
+        ownerIdx = null;
+      }
+      var item = {
+        n: n, col: 'main', owner: null, w: b.w, h: b.h, lines: b.lines,
+        top: mainY, bottom: mainY + b.h, cy: mainY + b.h / 2, cx: FLOW.cx
+      };
+      items.push(item);
+      mainY = item.bottom + FLOW.gap;
+      if (n.kind === 'decision') armedIdx = items.length - 1;
+      else armedIdx = null;
     });
-    var height = (placed.length ? placed[placed.length - 1].bottom : FLOW.top) + 96;
-    return { items: placed, height: height };
+
+    var bottom = FLOW.top;
+    items.forEach(function (it) { if (it.bottom > bottom) bottom = it.bottom; });
+    return { items: items, height: bottom + 96 };
+  }
+
+  /** 主線上的第 k 個節點是誰（索引）。分支步驟不算在主線上。 */
+  function flowMainIndexes(items) {
+    var out = [];
+    items.forEach(function (it, i) { if (it.col === 'main') out.push(i); });
+    return out;
   }
 
   function flowTextLines(lines, cx, cy, count, fs, fill, weight) {
@@ -1049,11 +1165,17 @@
       '" text-anchor="middle" letter-spacing="0.1em">' + escapeXml(text) + '</text>';
   }
 
-  function flowShape(item, accent) {
-    var n = item.n, cx = FLOW.cx, cy = item.cy, w = item.w, h = item.h;
+  function flowShape(item, accent, pill) {
+    var n = item.n, cx = item.cx == null ? FLOW.cx : item.cx, cy = item.cy, w = item.w, h = item.h;
     var ink = UPSTREAM_LIGHT.ink, ac = UPSTREAM_LIGHT.accent;
     var stroke = accent ? ac : ink;
     var fill = accent ? 'rgba(235,108,54,0.08)' : '#ffffff';
+    /* 分支步驟：淡一點的框，一眼看得出它不在主線上 */
+    if (n.kind === 'branch') {
+      return '<rect x="' + round1(cx - w / 2) + '" y="' + round1(item.top) + '" width="' + w +
+        '" height="' + round1(h) + '" rx="' + (pill ? round1(h / 2) : 6) +
+        '" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>';
+    }
     if (n.kind === 'start' || n.kind === 'end') {
       fill = accent ? 'rgba(235,108,54,0.08)' : 'rgba(45,49,66,0.03)';
       return '<rect x="' + round1(cx - w / 2) + '" y="' + round1(item.top) + '" width="' + w +
@@ -1070,8 +1192,10 @@
   }
 
   /**
-   * 把大綱畫成一張自足的 SVG。
+   * 把節點畫成一張自足的 SVG。
    * 顏色一律用上游那四個色票的字面值，換配色與換字體那兩條路才吃得到它。
+   *
+   * 畫的順序是「先線後框」——線才不會蓋在框上面。
    */
   function renderFlowSvg(parsed, opts) {
     var o = opts || {};
@@ -1098,83 +1222,114 @@
     if (!items.length) {
       parts.push('<text x="' + FLOW.cx + '" y="' + Math.round(H / 2) + '" fill="' + muted +
         '" font-size="14" font-family="' + FONTS.sans + '" text-anchor="middle">' +
-        '在上面的大綱框裡打字，這裡就會出現流程圖</text></svg>');
+        '在左邊加幾個步驟，這裡就會出現流程圖</text></svg>');
       return parts.join('');
     }
 
-    /* 先畫線，再畫方塊——線才不會蓋在框上面 */
-    items.forEach(function (item, i) {
-      var next = items[i + 1];
-      if (next) {
-        var last = i === items.length - 2 && next.n.kind === 'end';
-        parts.push('<line x1="' + FLOW.cx + '" y1="' + round1(item.bottom) + '" x2="' + FLOW.cx +
-          '" y2="' + round1(next.top - 2) + '" stroke="' + (last ? ac : muted) +
-          '" stroke-width="' + (last ? 1.4 : 1.2) + '" marker-end="url(#ddflow-arrow' +
-          (last ? '-accent' : '') + ')"/>');
-        /* 判斷往下走的那條線，自動標上分支的相反詞 */
-        var down = item.n.kind === 'decision'
-          ? flowOpposite((item.n.branch && item.n.branch.label) || (item.n.loop && item.n.loop.label) || '')
-          : '';
+    var mains = flowMainIndexes(items);
+    var lastMain = mains.length ? mains[mains.length - 1] : -1;
+    var hasSide = items.some(function (it) { return it.col === 'side'; });
+
+    /* ── 線 ─────────────────────────────────────────────────────────
+       主線一格接一格；分支從判斷拉出去、自己往下接，接完再匯回主線。 */
+    mains.forEach(function (idx, k) {
+      var item = items[idx];
+      var nextIdx = mains[k + 1];
+      if (nextIdx == null) return;
+      var next = items[nextIdx];
+      var last = k === mains.length - 2 && next.n.kind === 'end';
+      parts.push('<line x1="' + FLOW.cx + '" y1="' + round1(item.bottom) + '" x2="' + FLOW.cx +
+        '" y2="' + round1(next.top - 2) + '" stroke="' + (last ? ac : muted) +
+        '" stroke-width="' + (last ? 1.4 : 1.2) + '" marker-end="url(#ddflow-arrow' +
+        (last ? '-accent' : '') + ')"/>');
+      /* 判斷往下走的那條線：使用者自己標，沒標就用往右那條的相反詞 */
+      if (item.n.kind === 'decision') {
+        var down = item.n.downLabel ||
+          flowOpposite((item.n.branch && item.n.branch.label) || (item.n.loop && item.n.loop.label) || '');
         if (down) parts.push(flowLabel(FLOW.cx, (item.bottom + next.top) / 2, down));
-      }
-      if (item.n.branch) {
-        var by = item.cy;
-        parts.push('<line x1="' + round1(FLOW.cx + item.w / 2) + '" y1="' + round1(by) +
-          '" x2="' + (FLOW.sideX - 2) + '" y2="' + round1(by) + '" stroke="' + muted +
-          '" stroke-width="1.2" marker-end="url(#ddflow-arrow)"/>');
-        parts.push(flowLabel((FLOW.cx + item.w / 2 + FLOW.sideX) / 2, by - 8, item.n.branch.label));
-      }
-      if (item.n.loop && item.n.loop.index != null) {
-        var target = items[item.n.loop.index];
-        if (target) {
-          var x0 = round1(FLOW.cx - item.w / 2);
-          var x1 = FLOW.loopX;
-          var ty = round1(target.cy);
-          parts.push('<path d="M ' + x0 + ' ' + round1(item.cy) + ' H ' + x1 + ' V ' + ty +
-            ' H ' + round1(FLOW.cx - target.w / 2 - 2) + '" fill="none" stroke="' + muted +
-            '" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#ddflow-arrow)"/>');
-          parts.push(flowLabel(x1, (item.cy + ty) / 2, item.n.loop.label));
-        }
       }
     });
 
-    /* 方塊與文字 */
+    /* 分支：判斷 → 第一格，格與格之間，最後一格 → 匯回主線 */
+    items.forEach(function (it, i) {
+      if (it.col !== 'side') return;
+      var owner = items[it.owner];
+      var prev = items[i - 1];
+      if (prev && prev.col === 'side' && prev.owner === it.owner) {
+        parts.push('<line x1="' + it.cx + '" y1="' + round1(prev.bottom) + '" x2="' + it.cx +
+          '" y2="' + round1(it.top - 2) + '" stroke="' + muted +
+          '" stroke-width="1.2" marker-end="url(#ddflow-arrow)"/>');
+      } else if (owner) {
+        parts.push('<line x1="' + round1(FLOW.cx + owner.w / 2) + '" y1="' + round1(it.cy) +
+          '" x2="' + (FLOW.sideX - 2) + '" y2="' + round1(it.cy) + '" stroke="' + muted +
+          '" stroke-width="1.2" marker-end="url(#ddflow-arrow)"/>');
+        parts.push(flowLabel((FLOW.cx + owner.w / 2 + FLOW.sideX) / 2, it.cy - 8,
+          (owner.n.branch && owner.n.branch.label) || ''));
+      }
+
+      /* 這一格是不是這條分支的最後一格？是的話畫匯回線 */
+      var next = items[i + 1];
+      var isLast = !(next && next.col === 'side' && next.owner === it.owner);
+      if (!isLast) return;
+      if (owner && owner.n.branchEnds) return;
+      /* 匯回點＝分支之後的第一個主線節點 */
+      var target = null;
+      for (var j = i + 1; j < items.length; j++) {
+        if (items[j].col === 'main') { target = items[j]; break; }
+      }
+      if (!target) return;
+      var jy = round1(target.top - 16);
+      parts.push('<path d="M ' + it.cx + ' ' + round1(it.bottom) + ' V ' + jy +
+        ' H ' + FLOW.cx + '" fill="none" stroke="' + muted + '" stroke-width="1.2"/>');
+      parts.push('<circle cx="' + FLOW.cx + '" cy="' + jy + '" r="2.6" fill="' + muted + '"/>');
+    });
+
+    /* 退回線：從判斷的左邊繞出去，接回前面某一步 */
+    items.forEach(function (item) {
+      if (!item.n.loop || item.n.loop.index == null) return;
+      var target = items[item.n.loop.index];
+      if (!target) return;
+      var x0 = round1(item.cx - item.w / 2);
+      var x1 = FLOW.loopX;
+      var ty = round1(target.cy);
+      parts.push('<path d="M ' + x0 + ' ' + round1(item.cy) + ' H ' + x1 + ' V ' + ty +
+        ' H ' + round1(target.cx - target.w / 2 - 2) + '" fill="none" stroke="' + muted +
+        '" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#ddflow-arrow)"/>');
+      parts.push(flowLabel(x1, (item.cy + ty) / 2, item.n.loop.label));
+    });
+
+    /* ── 方塊與文字 ─────────────────────────────────────────────────── */
     items.forEach(function (item, i) {
       var n = item.n;
-      var accent = n.kind === 'end' && i === items.length - 1;
-      parts.push(flowShape(item, accent));
+      var accent = n.kind === 'end' && i === lastMain;
+      /* 分支勾了「不回主線」時，最後一格畫成圓角收尾——不然看起來像沒畫完 */
+      var pill = false;
+      if (item.col === 'side') {
+        var owner = items[item.owner];
+        var next = items[i + 1];
+        pill = !!(owner && owner.n.branchEnds) && !(next && next.col === 'side' && next.owner === item.owner);
+      }
+      parts.push(flowShape(item, accent, pill));
       var textCy = n.sub ? item.cy - 7 : item.cy;
-      parts.push(flowTextLines(item.lines, FLOW.cx, textCy, item.lines.length,
+      parts.push(flowTextLines(item.lines, item.cx, textCy, item.lines.length,
         n.kind === 'decision' ? 12 : FLOW.fs, ink, '600'));
       if (n.sub) {
-        parts.push('<text x="' + FLOW.cx + '" y="' + round1(item.cy + (item.lines.length - 1) * FLOW.lineH / 2 + 16) +
+        parts.push('<text x="' + item.cx + '" y="' +
+          round1(item.cy + (item.lines.length - 1) * FLOW.lineH / 2 + 16) +
           '" fill="' + muted + '" font-size="' + FLOW.fsSub + '" font-family="' + FONTS.mono +
           '" text-anchor="middle">' + escapeXml(n.sub) + '</text>');
       }
-      if (n.branch) {
-        var bw = FLOW.sideW, bx = FLOW.sideX, bh = FLOW.sideH;
-        var byTop = round1(item.cy - bh / 2);
-        parts.push('<rect x="' + bx + '" y="' + byTop + '" width="' + bw + '" height="' + bh +
-          '" rx="' + (bh / 2) + '" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>');
-        var bcx = bx + bw / 2;
-        var blines = wrapLabel(n.branch.text.main, (bw - 28) / 12);
-        parts.push(flowTextLines(blines, bcx, n.branch.text.sub ? item.cy - 7 : item.cy,
-          blines.length, 12, ink, '600'));
-        if (n.branch.text.sub) {
-          parts.push('<text x="' + bcx + '" y="' + round1(item.cy + (blines.length - 1) * FLOW.lineH / 2 + 16) +
-            '" fill="' + muted + '" font-size="' + FLOW.fsSub + '" font-family="' + FONTS.mono +
-            '" text-anchor="middle">' + escapeXml(n.branch.text.sub) + '</text>');
-        }
-      }
     });
 
-    /* 圖例：跟範本庫同一套，讓自己排的圖跟挑來的圖看起來是一家人 */
+    /* 圖例：跟範本庫同一套，讓自己做的圖跟挑來的圖看起來是一家人 */
     var ly = H - 58;
     parts.push('<line x1="40" y1="' + round1(ly) + '" x2="960" y2="' + round1(ly) +
       '" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>');
     parts.push('<text x="40" y="' + round1(ly + 16) + '" fill="' + muted + '" font-size="8" font-family="' +
       FONTS.mono + '" letter-spacing="0.18em">圖例 · 形狀代表類型</text>');
-    var legend = [['起訖（橢圓）', 24], ['步驟（矩形）', 6], ['判斷（菱形）', -1], ['退回', -2]];
+    var legend = [['起訖（橢圓）', 24], ['步驟（矩形）', 6], ['判斷（菱形）', -1]];
+    if (hasSide) legend.push(['分支步驟', 6]);
+    if (items.some(function (it) { return it.n.loop; })) legend.push(['退回', -2]);
     var lx = 40;
     legend.forEach(function (it) {
       var name = it[0], rx = it[1];
@@ -1198,19 +1353,6 @@
     return parts.join('');
   }
 
-  /* 打開產生器時先給一個真的公文流程，使用者照著改比從空白開始容易得多 */
-  var FLOW_EXAMPLE = [
-    '開始 收到來文',
-    '步驟 登記收文 / 收發室',
-    '判斷 是否本科權責？',
-    '  否 → 移文他科 / 並副知來文機關',
-    '步驟 承辦人擬稿 / 附法令依據',
-    '步驟 科長審核',
-    '判斷 內容是否需要修正？',
-    '  是 ↑ 承辦人擬稿',
-    '步驟 主管決行',
-    '結束 發文並歸檔'
-  ].join('\n');
 
   /* ── 清單篩選 ────────────────────────────────────────────────────── */
 
@@ -1282,9 +1424,10 @@
     parseViewBox: parseViewBox, textUnits: textUnits, wrapLabel: wrapLabel, shrinkToFit: shrinkToFit,
     setSvgAttrs: setSvgAttrs, composeExportSvg: composeExportSvg, svgFile: svgFile,
     buildStandaloneHtml: buildStandaloneHtml, safeFilename: safeFilename,
-    FLOW: FLOW, FLOW_EXAMPLE: FLOW_EXAMPLE, FLOW_KEYWORDS: FLOW_KEYWORDS,
+    crc32: crc32, zipStore: zipStore, buildDocx: buildDocx,
+    FLOW: FLOW,
     splitFlowText: splitFlowText, flowOpposite: flowOpposite,
-    parseFlow: parseFlow, layoutFlow: layoutFlow, renderFlowSvg: renderFlowSvg,
+    layoutFlow: layoutFlow, flowMainIndexes: flowMainIndexes, renderFlowSvg: renderFlowSvg,
     parseAssetName: parseAssetName, typeLabel: typeLabel, variantLabel: variantLabel,
     filterDiagrams: filterDiagrams
   };

@@ -139,6 +139,7 @@
   var FLOW_KIND_OPTIONS = [
     { value: 'step', label: '步驟' },
     { value: 'decision', label: '判斷' },
+    { value: 'branch', label: '分支步驟' },
     { value: 'start', label: '開始' },
     { value: 'end', label: '結束' }
   ];
@@ -150,48 +151,66 @@
     sample: 'example-flowchart',
     sampleTitle: '公文簽辦流程',
     help: [
-      '型別選「判斷」才會出現分岔的三個欄位；其餘一律是矩形步驟，開始與結束是橢圓。',
-      '「分支結果」是往右接一個結果（例如「移文他科」），只有那一格，不再往下走。',
+      '型別選「判斷」才會出現分岔的欄位；其餘一律是矩形步驟，開始與結束是橢圓。',
+      '判斷底下接幾列「分支步驟」，就是往右岔出去的那一路——可以連走好幾步，走完自動匯回主線。',
+      '分支不想回主線（例如「移文他科」就結案了），把判斷那列的「分支不回主線」勾起來。',
       '「退回到」是把線拉回前面某一步（例如退回承辦人重擬），只能選前面已經有的步驟。',
-      '「分支標籤」是那條線上的字（是／否）。同一個判斷兩條都有時，往下走的那條會自動標相反的。'
+      '三條線的字（往右、往下、退回）各自有欄位，留空的話往下那條會自動標成往右那條的相反詞。'
     ],
     rowName: '步驟',
     fields: [
-      { key: 'kind', label: '型別', type: 'select', options: FLOW_KIND_OPTIONS, width: '90px' },
+      { key: 'kind', label: '型別', type: 'select', options: FLOW_KIND_OPTIONS, width: '104px' },
       { key: 'main', label: '文字', type: 'text', placeholder: '登記收文' },
       { key: 'sub', label: '小字副標（可留空）', type: 'text', placeholder: '收發室' },
-      { key: 'branchLabel', label: '分支標籤', type: 'text', placeholder: '否', width: '76px', only: 'decision' },
-      { key: 'branchText', label: '分支結果（往右）', type: 'text', placeholder: '移文他科', only: 'decision' },
-      { key: 'loopTo', label: '退回到', type: 'rowref', width: '140px', only: 'decision' }
+      { key: 'branchLabel', label: '往右分支標的字', type: 'text', placeholder: '否', width: '112px', only: 'decision' },
+      { key: 'downLabel', label: '往下走標的字', type: 'text', placeholder: '是', width: '112px', only: 'decision' },
+      { key: 'loopTo', label: '退回到', type: 'rowref', width: '150px', only: 'decision' },
+      { key: 'loopLabel', label: '退回線標的字', type: 'text', placeholder: '是', width: '112px', only: 'decision' },
+      { key: 'branchEnds', label: '分支不回主線', type: 'check', width: '92px', only: 'decision',
+        hint: '勾了分支就自成一路收尾，不畫匯回主線的線' }
     ],
     example: [
       { kind: 'start', main: '收到來文' },
       { kind: 'step', main: '登記收文', sub: '收發室' },
-      { kind: 'decision', main: '是否本科權責？', branchLabel: '否', branchText: '移文他科' },
+      { kind: 'decision', main: '是否本科權責？', branchLabel: '否', downLabel: '是', branchEnds: true },
+      { kind: 'branch', main: '移文他科', sub: '並副知來文機關' },
+      { kind: 'branch', main: '結案登記' },
       { kind: 'step', main: '承辦人擬稿', sub: '附法令依據' },
       { kind: 'step', main: '科長審核' },
-      { kind: 'decision', main: '內容是否需要修正？', branchLabel: '是', loopTo: '承辦人擬稿' },
+      { kind: 'decision', main: '內容是否需要修正？', downLabel: '否', loopTo: '承辦人擬稿', loopLabel: '是' },
       { kind: 'step', main: '主管決行' },
       { kind: 'end', main: '發文並歸檔' }
     ],
     build: function (rows, meta, opts) {
       var warnings = [];
       var nodes = [];
+      var lastKind = null;
       (rows || []).forEach(function (row, i) {
         var main = String(row.main || '').trim();
         if (!main) { if (hasAny(row)) warnings.push('第 ' + (i + 1) + ' 列沒有填文字，跳過了。'); return; }
         var kind = row.kind || 'step';
-        var n = { kind: kind, main: main, sub: String(row.sub || '').trim(), branch: null, loop: null };
+        /* 分支步驟一定要接在判斷（或另一個分支步驟）底下，不然掛不上去 */
+        if (kind === 'branch' && lastKind !== 'decision' && lastKind !== 'branch') {
+          warnings.push('第 ' + (i + 1) + ' 列「' + main +
+            '」是分支步驟，但它上面不是判斷，也不是另一個分支步驟，先當成一般步驟畫。');
+          kind = 'step';
+        }
+        var n = {
+          kind: kind, main: main, sub: String(row.sub || '').trim(),
+          branch: null, loop: null, downLabel: '', branchEnds: false
+        };
         if (kind === 'decision') {
-          var bt = String(row.branchText || '').trim();
-          if (bt) n.branch = { label: String(row.branchLabel || '否').trim() || '否', text: DD.splitFlowText(bt) };
+          n.branch = { label: String(row.branchLabel || '').trim() || '否' };
+          n.downLabel = String(row.downLabel || '').trim();
+          n.branchEnds = !!row.branchEnds;
           var lt = String(row.loopTo || '').trim();
-          if (lt) n.loop = { label: String(row.branchLabel || '是').trim() || '是', target: lt };
-          if (n.branch && n.loop) n.loop.label = DD.flowOpposite(n.branch.label) || '是';
+          if (lt) n.loop = { label: String(row.loopLabel || '').trim() || '是', target: lt };
         }
         nodes.push(n);
+        lastKind = kind;
       });
 
+      /* 退回目標指不到前面的節點時，講得出是哪一個判斷、指了什麼 */
       nodes.forEach(function (n, idx) {
         if (!n.loop) return;
         var found = -1;
@@ -200,6 +219,21 @@
           warnings.push('「' + n.main + '」的退回目標「' + n.loop.target + '」不在它前面，這條退回線畫不出來。');
           n.loop = null;
         } else n.loop.index = found;
+      });
+
+      /* 分支走完卻沒有主線可以匯回，就等於自成一路——講一聲，不要靜靜少畫一條線 */
+      nodes.forEach(function (n, idx) {
+        if (n.kind !== 'branch' || n.branchEnds) return;
+        var owner = null, k;
+        for (k = idx; k >= 0; k--) if (nodes[k].kind === 'decision') { owner = nodes[k]; break; }
+        var isLast = !(nodes[idx + 1] && nodes[idx + 1].kind === 'branch');
+        if (!isLast || !owner || owner.branchEnds) return;
+        var hasAfter = false;
+        for (k = idx + 1; k < nodes.length; k++) if (nodes[k].kind !== 'branch') { hasAfter = true; break; }
+        if (!hasAfter) {
+          warnings.push('「' + n.main + '」後面沒有主線步驟可以匯回。' +
+            '在它下面加一個步驟，或把上面那個判斷勾成「分支不回主線」。');
+        }
       });
 
       if (!nodes.length) return { svg: emptyCanvas('在左邊加幾個步驟，這裡就會出現流程圖'), warnings: warnings, count: 0 };
@@ -235,7 +269,8 @@
       { key: 'start', label: '起日', type: 'text', placeholder: '114/3/1', width: '110px' },
       { key: 'end', label: '迄日', type: 'text', placeholder: '114/3/20', width: '110px' },
       { key: 'phase', label: '階段（可留空）', type: 'text', placeholder: '需求盤點', width: '130px' },
-      { key: 'milestone', label: '查核點', type: 'check', width: '64px' }
+      { key: 'milestone', label: '查核點', type: 'check', width: '76px',
+        hint: '勾了畫成菱形的里程碑，不畫長條' }
     ],
     example: [
       { name: '各科室需求訪談', start: '114/3/3', end: '114/3/21', phase: '需求盤點' },
@@ -382,7 +417,8 @@
       { key: 'date', label: '日期', type: 'text', placeholder: '114/2', width: '120px' },
       { key: 'title', label: '事件', type: 'text', placeholder: '修正草案預告' },
       { key: 'note', label: '說明（可留空）', type: 'text', placeholder: '預告期 60 日' },
-      { key: 'major', label: '重要', type: 'check', width: '64px' }
+      { key: 'major', label: '重要', type: 'check', width: '76px',
+        hint: '勾了圓點放大、用強調色標出來' }
     ],
     example: [
       { date: '114/2', title: '修正草案預告', note: '預告期 60 日' },
@@ -468,7 +504,8 @@
     fields: [
       { key: 'name', label: '層名', type: 'text', placeholder: '受理與分辦' },
       { key: 'note', label: '內容（可留空）', type: 'text', placeholder: '收文 · 分文 · 派案' },
-      { key: 'focal', label: '重點層', type: 'check', width: '72px' }
+      { key: 'focal', label: '重點層', type: 'check', width: '84px',
+        hint: '勾了會用強調色框起來' }
     ],
     meta: [
       { key: 'topLabel', label: '最上層標示', type: 'text', placeholder: '上層', width: '140px' },
@@ -552,7 +589,8 @@
       { key: 'name', label: '項目', type: 'text', placeholder: '線上申辦改版' },
       { key: 'x', label: '橫軸', type: 'select', options: SCORE_OPTIONS, width: '92px' },
       { key: 'y', label: '縱軸', type: 'select', options: SCORE_OPTIONS, width: '92px' },
-      { key: 'focal', label: '重點', type: 'check', width: '64px' }
+      { key: 'focal', label: '重點', type: 'check', width: '76px',
+        hint: '勾了會用強調色標出來' }
     ],
     meta: [
       { key: 'xLabel', label: '橫軸名稱', type: 'text', placeholder: '投入', width: '150px' },
@@ -641,9 +679,429 @@
     }
   };
 
+  /* ══ 六、組織圖 ═══════════════════════════════════════════════════
+     樹狀排版：葉子由左而右一個接一個放，父節點置中在自己的子節點上方。
+     這是 tidy tree 的第一課，對編制表這種寬而淺的樹夠用，而且算得出來、測得到。
+     真正的 Reingold–Tilford 還要處理「兄弟子樹互相推擠」，編制表用不到那個。 */
+
+  var ORG = { boxW: 150, boxH: 52, gapX: 18, gapY: 46, top: 76 };
+
+  var orgGen = {
+    id: 'org',
+    name: '組織圖',
+    use: '編制與分工：誰下面有誰。填「上級是誰」就好，位置由程式排。',
+    sample: 'example-org-chart',
+    sampleTitle: '本處組織與分工',
+    help: [
+      '第一列不用選上級，它就是最上面那一個（機關首長或單位名稱）。',
+      '「上級」只能選前面已經出現過的單位，所以由上而下、一層一層填最順。',
+      '同一個上級底下的單位會由左而右並排，寬度由程式算，不必自己對齊。',
+      '層數太多會越畫越窄；超過四層建議拆成兩張圖。'
+    ],
+    rowName: '單位',
+    fields: [
+      { key: 'name', label: '單位／職稱', type: 'text', placeholder: '人事處' },
+      { key: 'note', label: '小字（人數、負責人，可留空）', type: 'text', placeholder: '編制 12 人' },
+      { key: 'parent', label: '上級', type: 'rowref', width: '170px' },
+      { key: 'focal', label: '重點', type: 'check', width: '64px',
+        hint: '勾了會用強調色框起來' }
+    ],
+    example: [
+      { name: '人事處', note: '處長 1 人' },
+      { name: '綜合規劃科', note: '編制 8 人', parent: '人事處' },
+      { name: '任免遷調科', note: '編制 10 人', parent: '人事處', focal: true },
+      { name: '考訓福利科', note: '編制 9 人', parent: '人事處' },
+      { name: '法制小組', parent: '綜合規劃科' },
+      { name: '研考小組', parent: '綜合規劃科' },
+      { name: '陞遷小組', parent: '任免遷調科' }
+    ],
+    build: function (rows, meta, opts) {
+      var warnings = [];
+      var nodes = [];
+      var byName = {};
+      (rows || []).forEach(function (row, i) {
+        var name = String(row.name || '').trim();
+        if (!name) { if (String(row.note || '').trim()) warnings.push('第 ' + (i + 1) + ' 列沒有填單位名稱，跳過了。'); return; }
+        if (byName[name] != null) {
+          warnings.push('「' + name + '」出現了兩次。單位名稱要不一樣，不然「上級」分不出你指的是哪一個。');
+          return;
+        }
+        var n = { name: name, note: String(row.note || '').trim(), focal: !!row.focal,
+          parentName: String(row.parent || '').trim(), parent: -1, kids: [] };
+        byName[name] = nodes.length;
+        nodes.push(n);
+      });
+
+      var roots = [];
+      nodes.forEach(function (n, i) {
+        if (!n.parentName) { roots.push(i); return; }
+        var p = byName[n.parentName];
+        /* 上級要在自己前面：指到後面（或指到自己）會繞成一個圈，畫不出來 */
+        if (p == null || p >= i) {
+          warnings.push('「' + n.name + '」的上級「' + n.parentName +
+            '」不在它前面，先當成最上層畫。上級要選前面已經填過的單位。');
+          roots.push(i);
+          return;
+        }
+        n.parent = p;
+        nodes[p].kids.push(i);
+      });
+
+      if (!nodes.length) {
+        return { svg: emptyCanvas('在左邊填單位名稱與上級，這裡就會出現組織圖'), warnings: warnings, count: 0 };
+      }
+      if (roots.length > 1) {
+        warnings.push('有 ' + roots.length + ' 個單位沒有上級，會並排在最上面一層。' +
+          '如果不是故意的，把它們的「上級」補上。');
+      }
+
+      /* 一、算每個節點的深度 */
+      var depth = nodes.map(function () { return 0; });
+      nodes.forEach(function (n, i) { if (n.parent >= 0) depth[i] = depth[n.parent] + 1; });
+      var maxDepth = depth.reduce(function (a, b) { return Math.max(a, b); }, 0);
+
+      /* 二、葉子由左而右排，父節點置中在子節點上方（後序走訪） */
+      var cursor = 0;
+      var cx = nodes.map(function () { return 0; });
+      var slot = ORG.boxW + ORG.gapX;
+      function place(i) {
+        var kids = nodes[i].kids;
+        if (!kids.length) { cx[i] = cursor * slot; cursor++; return; }
+        kids.forEach(place);
+        cx[i] = (cx[kids[0]] + cx[kids[kids.length - 1]]) / 2;
+      }
+      roots.forEach(place);
+
+      /* 三、整棵樹置中，太寬就整體縮小——寧可小一點也不要畫到框外 */
+      var minX = Infinity, maxX = -Infinity;
+      cx.forEach(function (v) { if (v < minX) minX = v; if (v > maxX) maxX = v; });
+      var treeW = maxX - minX + ORG.boxW;
+      var scale = Math.min(1, (W - 80) / treeW);
+      if (scale < 1) {
+        warnings.push('單位有點多，整張圖縮小到 ' + Math.round(scale * 100) +
+          '% 才放得下。字會變小，必要時拆成兩張圖。');
+      }
+      var offset = (W - treeW * scale) / 2 - minX * scale;
+      var px = cx.map(function (v) { return v * scale + offset + ORG.boxW * scale / 2; });
+
+      var bw = ORG.boxW * scale, bh = ORG.boxH;
+      var py = depth.map(function (d) { return ORG.top + d * (bh + ORG.gapY); });
+      var H = ORG.top + (maxDepth + 1) * (bh + ORG.gapY) + 60;
+      var out = [canvasOpen(H, '組織圖')];
+
+      /* 連線：父到子走「下、橫、下」的直角線，斜線在組織圖裡看起來很亂 */
+      nodes.forEach(function (n, i) {
+        if (!n.kids.length) return;
+        var midY = py[i] + bh + ORG.gapY / 2;
+        out.push('<line x1="' + r1(px[i]) + '" y1="' + r1(py[i] + bh) + '" x2="' + r1(px[i]) +
+          '" y2="' + r1(midY) + '" stroke="' + C.muted + '" stroke-width="1.1"/>');
+        var xs = n.kids.map(function (k) { return px[k]; });
+        out.push('<line x1="' + r1(Math.min.apply(null, xs)) + '" y1="' + r1(midY) + '" x2="' +
+          r1(Math.max.apply(null, xs)) + '" y2="' + r1(midY) + '" stroke="' + C.muted + '" stroke-width="1.1"/>');
+        n.kids.forEach(function (k) {
+          out.push('<line x1="' + r1(px[k]) + '" y1="' + r1(midY) + '" x2="' + r1(px[k]) +
+            '" y2="' + r1(py[k] - 2) + '" stroke="' + C.muted +
+            '" stroke-width="1.1" marker-end="url(#ddg-arrow)"/>');
+        });
+      });
+
+      nodes.forEach(function (n, i) {
+        var fs = Math.max(9, 12.5 * Math.min(1, scale + 0.2));
+        var lines = DD.wrapLabel(n.name, (bw - 16) / fs).slice(0, 2);
+        out.push('<rect x="' + r1(px[i] - bw / 2) + '" y="' + r1(py[i]) + '" width="' + r1(bw) +
+          '" height="' + bh + '" rx="6" fill="' + (n.focal ? 'rgba(235,108,54,0.08)' : '#ffffff') +
+          '" stroke="' + (n.focal ? C.accent : C.ink) + '" stroke-width="1"/>');
+        var ty = py[i] + bh / 2 + (n.note ? -3 : 4) - (lines.length - 1) * 7;
+        lines.forEach(function (ln, k) {
+          out.push(text(px[i], ty + k * 15, ln,
+            { fill: C.ink, size: fs, weight: '600', anchor: 'middle' }));
+        });
+        if (n.note) {
+          out.push(text(px[i], py[i] + bh / 2 + (lines.length - 1) * 7 + 14, n.note,
+            { fill: C.muted, size: 8.5, font: F.mono, anchor: 'middle' }));
+        }
+      });
+
+      out.push(legend(H - 44, [
+        { name: '單位', mark: swatchRect('#ffffff', C.ink, 3) },
+        { name: '重點單位', mark: swatchRect('rgba(235,108,54,0.08)', C.accent, 3) },
+        { name: '上下層級', mark: swatchLine(C.muted) }
+      ]));
+      out.push('</svg>');
+      return { svg: out.join(''), warnings: warnings, count: nodes.length };
+    }
+  };
+
+  /* ══ 七、泳道圖 ═══════════════════════════════════════════════════
+     一條泳道一個單位，步驟由左而右照填的順序走。換泳道時線會斜著跨過去，
+     那條斜線就是「案子從這一科交到那一科」——泳道圖的重點就是這個。 */
+
+  var LANE = { x: 150, top: 66, laneH: 92, boxW: 112, boxH: 46, gapX: 24 };
+
+  var swimlaneGen = {
+    id: 'swimlane',
+    name: '泳道圖',
+    use: '跨科室的案件流轉：哪一段是誰做的、案子在哪裡交接。',
+    sample: 'example-swimlane',
+    sampleTitle: '跨科室案件流轉',
+    help: [
+      '一條泳道一個單位。泳道的順序＝各單位第一次出現的順序。',
+      '步驟由左而右照你填的順序走，不必自己對齊。',
+      '同一個單位連續做好幾步就填好幾列，換人做就換「負責單位」。',
+      '單位不要超過五個、步驟不要超過八個，不然會擠到看不清楚。'
+    ],
+    rowName: '步驟',
+    fields: [
+      { key: 'lane', label: '負責單位', type: 'text', placeholder: '收發室', width: '170px' },
+      { key: 'main', label: '步驟', type: 'text', placeholder: '收文登記' },
+      { key: 'sub', label: '小字（可留空）', type: 'text', placeholder: '當日' },
+      { key: 'focal', label: '重點', type: 'check', width: '64px',
+        hint: '勾了會用強調色框起來' }
+    ],
+    example: [
+      { lane: '收發室', main: '收文登記', sub: '當日' },
+      { lane: '承辦科', main: '簽辦擬稿', sub: '3 日內' },
+      { lane: '法制科', main: '法規審查', focal: true },
+      { lane: '承辦科', main: '修正後陳核' },
+      { lane: '主任秘書', main: '核判' },
+      { lane: '收發室', main: '發文歸檔' }
+    ],
+    build: function (rows, meta, opts) {
+      var warnings = [];
+      var steps = [];
+      var lanes = [];
+      (rows || []).forEach(function (row, i) {
+        var main = String(row.main || '').trim();
+        var lane = String(row.lane || '').trim();
+        if (!main && !lane) return;
+        if (!main) { warnings.push('第 ' + (i + 1) + ' 列沒有填步驟，跳過了。'); return; }
+        if (!lane) { warnings.push('「' + main + '」沒有填負責單位，先放在第一條泳道。'); lane = lanes[0] || '未指定'; }
+        if (lanes.indexOf(lane) < 0) lanes.push(lane);
+        steps.push({ lane: lane, main: main, sub: String(row.sub || '').trim(), focal: !!row.focal });
+      });
+
+      if (!steps.length) {
+        return { svg: emptyCanvas('在左邊填負責單位與步驟，這裡就會出現泳道圖'), warnings: warnings, count: 0 };
+      }
+      if (lanes.length > 6) {
+        warnings.push('有 ' + lanes.length + ' 個單位，泳道會很擠。建議併一併或拆成兩張圖。');
+      }
+
+      /* 步驟太多就縮小格子，寧可小一點也不要畫到框外 */
+      var avail = W - LANE.x - 40;
+      var bw = LANE.boxW, gap = LANE.gapX;
+      var need = steps.length * bw + (steps.length - 1) * gap;
+      if (need > avail) {
+        var k = avail / need;
+        bw = Math.max(64, bw * k);
+        gap = Math.max(16, gap * k);
+        warnings.push('步驟有點多，格子縮小了才放得下。超過八個步驟建議拆成兩張圖。');
+      }
+
+      var laneH = LANE.laneH;
+      var H = LANE.top + lanes.length * laneH + 76;
+      var out = [canvasOpen(H, '泳道圖')];
+      var laneY = function (name) { return LANE.top + lanes.indexOf(name) * laneH; };
+
+      lanes.forEach(function (name, i) {
+        var y = LANE.top + i * laneH;
+        out.push('<rect x="40" y="' + r1(y) + '" width="' + (W - 80) + '" height="' + laneH +
+          '" fill="' + (i % 2 ? 'rgba(45,49,66,0.025)' : 'transparent') +
+          '" stroke="rgba(45,49,66,0.12)" stroke-width="0.8"/>');
+        out.push('<line x1="' + LANE.x + '" y1="' + r1(y) + '" x2="' + LANE.x + '" y2="' + r1(y + laneH) +
+          '" stroke="rgba(45,49,66,0.12)" stroke-width="0.8"/>');
+        var nm = DD.wrapLabel(name, 88 / 12).slice(0, 3);
+        nm.forEach(function (ln, k) {
+          out.push(text(95, y + laneH / 2 + 4 + (k - (nm.length - 1) / 2) * 15, ln,
+            { fill: C.ink, size: 11.5, weight: '600', anchor: 'middle' }));
+        });
+      });
+
+      var sx = steps.map(function (s, i) { return LANE.x + 26 + i * (bw + gap); });
+      var sy = steps.map(function (s) { return laneY(s.lane) + laneH / 2 - LANE.boxH / 2; });
+
+      /* 先畫線：同一條泳道就走直的，換泳道就斜著跨過去——那條斜線就是交接 */
+      steps.forEach(function (s, i) {
+        var next = steps[i + 1];
+        if (!next) return;
+        var x0 = sx[i] + bw, x1 = sx[i + 1];
+        var y0 = sy[i] + LANE.boxH / 2, y1 = sy[i + 1] + LANE.boxH / 2;
+        var cross = s.lane !== next.lane;
+        out.push('<path d="M ' + r1(x0) + ' ' + r1(y0) + ' C ' + r1(x0 + (x1 - x0) * 0.5) + ' ' + r1(y0) +
+          ', ' + r1(x0 + (x1 - x0) * 0.5) + ' ' + r1(y1) + ', ' + r1(x1 - 3) + ' ' + r1(y1) +
+          '" fill="none" stroke="' + (cross ? C.accent : C.muted) + '" stroke-width="' + (cross ? 1.4 : 1.2) +
+          '" marker-end="url(#ddg-arrow' + (cross ? '-accent' : '') + ')"/>');
+      });
+
+      steps.forEach(function (s, i) {
+        var fs = Math.max(9, Math.min(12, bw / 11));
+        var lines = DD.wrapLabel(s.main, (bw - 14) / fs).slice(0, 2);
+        out.push('<rect x="' + r1(sx[i]) + '" y="' + r1(sy[i]) + '" width="' + r1(bw) +
+          '" height="' + LANE.boxH + '" rx="6" fill="' + (s.focal ? 'rgba(235,108,54,0.08)' : '#ffffff') +
+          '" stroke="' + (s.focal ? C.accent : C.ink) + '" stroke-width="1"/>');
+        var cxx = sx[i] + bw / 2;
+        var ty = sy[i] + LANE.boxH / 2 + (s.sub ? -3 : 4) - (lines.length - 1) * 6.5;
+        lines.forEach(function (ln, k) {
+          out.push(text(cxx, ty + k * 14, ln, { fill: C.ink, size: fs, weight: '600', anchor: 'middle' }));
+        });
+        if (s.sub) {
+          out.push(text(cxx, sy[i] + LANE.boxH / 2 + (lines.length - 1) * 6.5 + 13, s.sub,
+            { fill: C.muted, size: 8, font: F.mono, anchor: 'middle' }));
+        }
+        out.push(text(sx[i] + bw / 2, sy[i] - 8, String(i + 1),
+          { fill: C.muted, size: 8, font: F.mono, anchor: 'middle' }));
+      });
+
+      out.push(legend(H - 44, [
+        { name: '步驟', mark: swatchRect('#ffffff', C.ink, 3) },
+        { name: '重點步驟', mark: swatchRect('rgba(235,108,54,0.08)', C.accent, 3) },
+        { name: '換單位（交接）', mark: swatchLine(C.accent) },
+        { name: '同單位接著做', mark: swatchLine(C.muted) }
+      ]));
+      out.push('</svg>');
+      return { svg: out.join(''), warnings: warnings, count: steps.length };
+    }
+  };
+
+  /* ── 從 Excel 貼一整塊 ─────────────────────────────────────────────
+     工作項目、起迄日、名單，本來就都躺在 Excel 裡。一行一列、一個 tab 一欄，
+     照這一種圖的欄位順序對過去，比一格一格打快十倍。
+     勾選欄吃「是／Y/1/V/✓」這幾種寫法——公務同仁的表格裡這幾種都有。 */
+
+  var YES = /^(是|有|v|y|yes|true|1|✓|ｖ|Ｖ|Ｙ)$/i;
+
+  /** 這一種圖從 Excel 貼進來時，欄位由左而右對應到哪幾個 key。 */
+  function pasteKeys(gen) {
+    return gen.fields.filter(function (f) { return f.type !== 'rowref'; })
+      .map(function (f) { return f.key; });
+  }
+
+  /**
+   * 把貼上的一塊文字切成列。回傳 { rows, warnings }。
+   * 只切格子、不做任何猜測——猜錯比沒有更難查。
+   */
+  function parsePasteRows(gen, textIn) {
+    var warnings = [];
+    var rows = [];
+    if (!gen) return { rows: rows, warnings: warnings };
+    var keys = pasteKeys(gen);
+    var lines = String(textIn == null ? '' : textIn).split(/\r\n|\r|\n/);
+    var over = 0;
+    lines.forEach(function (raw) {
+      if (!raw.trim()) return;
+      var cells = raw.split('\t').map(function (c) { return c.trim(); });
+      /* 沒有 tab 的話多半是只貼了一欄，就當成第一個欄位 */
+      var row = {};
+      keys.forEach(function (k, i) {
+        var f = fieldByKey(gen, k);
+        var v = cells[i] == null ? '' : cells[i];
+        if (f.type === 'check') row[k] = YES.test(v);
+        else if (f.type === 'select') row[k] = matchOption(f, v);
+        else row[k] = v;
+      });
+      if (cells.length > keys.length) over++;
+      rows.push(row);
+    });
+    if (over) {
+      warnings.push('有 ' + over + ' 行的欄位比這種圖需要的多，多出來的欄被忽略了。' +
+        '欄位順序是：' + keys.map(function (k) { return fieldByKey(gen, k).label; }).join('、') + '。');
+    }
+    if (!rows.length) warnings.push('貼上的內容是空的。在 Excel 選一塊（含多欄）複製，再貼進來。');
+    return { rows: rows, warnings: warnings };
+  }
+
+  function fieldByKey(gen, key) {
+    for (var i = 0; i < gen.fields.length; i++) if (gen.fields[i].key === key) return gen.fields[i];
+    return { key: key, type: 'text', label: key };
+  }
+
+  /** 下拉欄位：使用者貼進來的是中文標籤（「判斷」），不是內部值（'decision'）。 */
+  function matchOption(f, v) {
+    var s = String(v || '').trim();
+    for (var i = 0; i < f.options.length; i++) {
+      if (f.options[i].label === s || f.options[i].value === s) return f.options[i].value;
+    }
+    return f.options[0].value;
+  }
+
+  /* ── 設定檔：把「填了什麼」存下來，下個月改一下日期再送一次 ──────────
+     跟範本庫的設定檔是不同格式（那邊記「第幾段改成什麼」），但同一個按鈕。
+     載入時看 kind 決定走哪一條路。 */
+
+  var GEN_PROJECT_VERSION = 1;
+
+  function buildGenProject(o) {
+    var s = o || {};
+    return JSON.stringify({
+      format: 'gongwu-diagram',
+      kind: 'generator',
+      version: GEN_PROJECT_VERSION,
+      savedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      type: s.type,
+      typeName: s.typeName || '',
+      title: s.title || '',
+      eyebrow: s.eyebrow || '',
+      palette: s.palette || 'source',
+      font: s.font || 'kai',
+      meta: s.meta || {},
+      rows: s.rows || [],
+      source: DD.SOURCE.credit
+    }, null, 2);
+  }
+
+  /**
+   * 讀回產生器的設定檔。壞掉要講人話，而且要講得出下一步該做什麼。
+   * 這是使用者給的輸入，每一格都要驗過才敢用。
+   */
+  function parseGenProject(text) {
+    var data;
+    try {
+      data = JSON.parse(String(text));
+    } catch (e) {
+      throw new Error('這不是本站存出來的設定檔（檔案內容不是合法的 JSON）。');
+    }
+    if (!data || data.format !== 'gongwu-diagram') {
+      throw new Error('這不是本站存出來的設定檔，請選副檔名為 .json 的「圖表設定」檔。');
+    }
+    if (data.kind !== 'generator') {
+      throw new Error('這是範本改字用的設定檔，不是做圖用的。請到範本那一頁載入它。');
+    }
+    if (!(data.version <= GEN_PROJECT_VERSION)) {
+      throw new Error('這份設定檔是較新版本的站台存出來的（version ' + data.version +
+        '），本站看不懂。請重新整理頁面後再試一次。');
+    }
+    var gen = byId(String(data.type || ''));
+    if (!gen) {
+      throw new Error('設定檔記的圖表種類「' + (data.type || '（空白）') + '」本站沒有，無法套用。');
+    }
+    var keys = {};
+    gen.fields.forEach(function (f) { keys[f.key] = f; });
+    var rows = (Array.isArray(data.rows) ? data.rows : []).map(function (r) {
+      var row = {};
+      gen.fields.forEach(function (f) {
+        var v = r && r[f.key];
+        if (f.type === 'check') row[f.key] = !!v;
+        else if (f.type === 'select') row[f.key] = matchOption(f, v);
+        else row[f.key] = v == null ? '' : String(v);
+      });
+      return row;
+    });
+    if (!rows.length) throw new Error('設定檔裡一列內容都沒有，載入了也是空白的。');
+    var meta = {};
+    (gen.meta || []).forEach(function (f) {
+      var v = data.meta && data.meta[f.key];
+      meta[f.key] = v == null ? '' : String(v);
+    });
+    return {
+      type: gen.id, gen: gen, rows: rows, meta: meta,
+      title: String(data.title || ''), eyebrow: String(data.eyebrow || ''),
+      palette: String(data.palette || 'source'), font: String(data.font || 'kai')
+    };
+  }
+
   /* ── 對外 ───────────────────────────────────────────────────────── */
 
-  var TYPES = [flowGen, ganttGen, timelineGen, layersGen, quadrantGen];
+  var TYPES = [flowGen, swimlaneGen, orgGen, ganttGen, timelineGen, layersGen, quadrantGen];
 
   function byId(id) {
     for (var i = 0; i < TYPES.length; i++) if (TYPES[i].id === id) return TYPES[i];
@@ -653,6 +1111,9 @@
   return {
     TYPES: TYPES, byId: byId,
     parseTwDate: parseTwDate, twLabel: twLabel, dayNum: dayNum,
-    emptyCanvas: emptyCanvas
+    emptyCanvas: emptyCanvas,
+    pasteKeys: pasteKeys, parsePasteRows: parsePasteRows,
+    GEN_PROJECT_VERSION: GEN_PROJECT_VERSION,
+    buildGenProject: buildGenProject, parseGenProject: parseGenProject
   };
 });

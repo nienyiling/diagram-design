@@ -29,6 +29,24 @@
 
   /* ── 載入 ────────────────────────────────────────────────────────── */
 
+  /**
+   * 做圖的那七種完全不需要 data/diagrams.json（它們自己算圖），
+   * 所以先把畫面立起來再去拿資料。範本資料載不到時，範本區不能用，
+   * 但主要功能照樣運作——不要讓「附帶的東西壞了」把整個站拖下水。
+   */
+  function boot() {
+    try {
+      fillMakes();
+      bind();
+      route();
+    } catch (e) {
+      show($('galleryErr'), '畫面初始化失敗（' + e.message + '）。' +
+        '這是本站的程式問題，不是你的網路。請重新整理；還是一樣的話請回報。');
+      return Promise.resolve();
+    }
+    return load();
+  }
+
   function load() {
     return fetch('data/diagrams.json')
       .then(function (r) {
@@ -38,14 +56,15 @@
       .then(function (json) {
         data = json;
         json.diagrams.forEach(function (d) { byId[d.id] = d; });
-        fillMakes();
         fillStarters();
         fillTypes();
-        bind();
+        /* 資料到了才知道範本存不存在，所以重跑一次路由：
+           使用者可能是直接開某一張範本的網址進來的 */
         route();
       })
       .catch(function (e) {
-        show($('galleryErr'), '範本資料載不進來（' + e.message + '）。\n' +
+        show($('galleryErr'), '範本資料載不進來（' + e.message + '）。' +
+          '上面七種「自己做一張」照常可以用，只有下面的 153 張範本受影響。\n' +
           '這個站要透過網址開啟才會動；如果是把檔案下載下來直接點開（file://），' +
           '瀏覽器會擋住讀取本機檔案，請改用線上網址。');
       });
@@ -272,6 +291,14 @@
     editor.hidden = true;
     gallery.hidden = false;
     document.title = '公務用圖表工具';
+    /* 網址指名一張範本，但資料還沒到：等 load() 完成會再跑一次 route() */
+    if (id && !data) return;
+    if (id) {
+      show($('galleryErr'), '找不到編號「' + id + '」的範本，先回到首頁。' +
+        '網址可能是舊的，或是打錯了。');
+      location.replace('#/');
+      return;
+    }
     if (!data) return;
     if (!$('tiles').children.length) renderTiles();
     window.scrollTo(0, lastScroll);
@@ -289,13 +316,13 @@
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', load);
+    document.addEventListener('DOMContentLoaded', boot);
   } else {
-    load();
+    boot();
   }
 
   window.DDApp = {
-    ready: load,
+    ready: boot,
     _data: function () { return data; },
     _renderTiles: renderTiles
   };

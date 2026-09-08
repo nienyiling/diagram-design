@@ -27,8 +27,9 @@ const buildExample = (gen) => gen.build(gen.example, defMeta(gen), {});
 /* ── 五種都要長得像同一種東西：規格是表單引擎照著長出畫面的依據 ────────── */
 
 await t('TYPES 是五種，id 不重複', () => {
-  assert.equal(G.TYPES.length, 5);
-  assert.deepEqual(G.TYPES.map((g) => g.id), ['flow', 'gantt', 'timeline', 'layers', 'quadrant']);
+  assert.equal(G.TYPES.length, 7);
+  assert.deepEqual(G.TYPES.map((g) => g.id),
+    ['flow', 'swimlane', 'org', 'gantt', 'timeline', 'layers', 'quadrant']);
 });
 
 await t('每一種都有畫面要用的規格：名稱、用途、列名、欄位、範例、示意範本', () => {
@@ -164,22 +165,46 @@ await t('流程圖：加一列就多一個節點', () => {
   assert.ok(words(out.svg).includes('後續追蹤'));
 });
 
-await t('流程圖：判斷的分支結果畫在右邊，分支標籤標在線上', () => {
+await t('流程圖：判斷底下的「分支步驟」畫在右邊，分支標籤標在線上', () => {
   const out = flow.build([
-    { kind: 'decision', main: '是否本科權責？', branchLabel: '否', branchText: '移文他科' }
+    { kind: 'decision', main: '是否本科權責？', branchLabel: '否', branchEnds: true },
+    { kind: 'branch', main: '移文他科', sub: '副知來文機關' }
   ], {}, {});
   const text = words(out.svg);
-  assert.ok(text.includes('移文他科'));
-  assert.ok(text.includes('否'));
+  assert.deepEqual(out.warnings, []);
+  assert.ok(text.includes('移文他科'), text);
+  assert.ok(text.includes('副知來文機關'), text);
+  assert.ok(text.includes('否'), text);
 });
 
-await t('流程圖：分支結果的斜線副標會拆成小字', () => {
+await t('流程圖：分支可以連走好幾步，走完匯回主線', () => {
   const out = flow.build([
-    { kind: 'decision', main: '要退嗎？', branchLabel: '是', branchText: '退回 / 附說明' }
+    { kind: 'decision', main: '資料齊全？', branchLabel: '否' },
+    { kind: 'branch', main: '通知補件' },
+    { kind: 'branch', main: '等待補件' },
+    { kind: 'step', main: '實質審查' }
   ], {}, {});
-  const text = words(out.svg);
-  assert.ok(text.includes('退回'), text);
-  assert.ok(text.includes('附說明'), text);
+  assert.deepEqual(out.warnings, []);
+  assert.equal(out.count, 4);
+  assert.ok(out.svg.includes('r="2.6"'), '沒有畫匯回主線的匯流點');
+});
+
+await t('流程圖：分支步驟上面不是判斷時，講一聲並當成一般步驟', () => {
+  const out = flow.build([
+    { kind: 'step', main: '甲' }, { kind: 'branch', main: '乙' }
+  ], {}, {});
+  assert.equal(out.count, 2);
+  assert.equal(out.warnings.length, 1);
+  assert.match(out.warnings[0], /第 2 列/);
+  assert.match(out.warnings[0], /乙/);
+});
+
+await t('流程圖：分支後面沒有主線可以匯回時，講得出兩條路怎麼走', () => {
+  const out = flow.build([
+    { kind: 'decision', main: '要不要？' }, { kind: 'branch', main: '不要' }
+  ], {}, {});
+  assert.equal(out.warnings.length, 1);
+  assert.match(out.warnings[0], /不回主線/);
 });
 
 await t('流程圖：退回目標指不到前面的步驟時，講得出是哪一個判斷、指了什麼', () => {
@@ -201,13 +226,29 @@ await t('流程圖：退回只能指前面，指到後面一樣要講', () => {
   assert.match(out.warnings[0], /不在它前面/);
 });
 
-await t('流程圖：兩條分支都填時，往下走的那條自動標相反的', () => {
+await t('流程圖：往下那條線的字沒填時，自動標成往右那條的相反詞', () => {
   const out = flow.build([
-    { kind: 'step', main: '擬稿' },
-    { kind: 'decision', main: '要修正嗎？', branchLabel: '否', branchText: '送出', loopTo: '擬稿' }
+    { kind: 'decision', main: '要修正嗎？', branchLabel: '否', branchEnds: true },
+    { kind: 'branch', main: '退件' },
+    { kind: 'step', main: '繼續辦' }
   ], {}, {});
   assert.deepEqual(out.warnings, []);
-  assert.ok(words(out.svg).includes('送出'));
+  const text = words(out.svg);
+  assert.ok(text.includes('否'), text);
+  assert.ok(text.includes('是'), '沒有自動標成相反的：' + text);
+});
+
+await t('流程圖：三條線的字各自有欄位，填了就照填的', () => {
+  const out = flow.build([
+    { kind: 'step', main: '擬稿' },
+    { kind: 'decision', main: '要修正嗎？', branchLabel: '甲', downLabel: '乙',
+      loopTo: '擬稿', loopLabel: '丙', branchEnds: true },
+    { kind: 'branch', main: '退件' },
+    { kind: 'step', main: '決行' }
+  ], {}, {});
+  assert.deepEqual(out.warnings, []);
+  const text = words(out.svg);
+  ['甲', '乙', '丙'].forEach((w) => assert.ok(text.includes(w), '線上少了「' + w + '」：' + text));
 });
 
 await t('流程圖：那一列只填了副標沒填文字時，講一句就跳過，不畫空方塊', () => {
@@ -356,6 +397,219 @@ await t('四象限：軸的名稱跟著使用者填的走', () => {
     { xLabel: '急迫', yLabel: '重要' }, {}).svg;
   const text = words(svg);
   assert.ok(text.includes('急迫') && text.includes('重要'), text);
+});
+
+
+/* ── 泳道圖 ────────────────────────────────────────────────────────── */
+
+const swim = G.byId('swimlane');
+
+await t('泳道圖：泳道的順序＝各單位第一次出現的順序', () => {
+  const svg = swim.build([
+    { lane: '乙科', main: '甲步驟' },
+    { lane: '甲科', main: '乙步驟' },
+    { lane: '乙科', main: '丙步驟' }
+  ], {}, {}).svg;
+  assert.ok(svg.indexOf('乙科') < svg.indexOf('甲科'), '泳道順序不對');
+  /* 同一個單位不會開兩條泳道 */
+  assert.equal((words(svg).match(/乙科/g) || []).length, 1);
+});
+
+await t('泳道圖：換單位那條線用強調色（那條線就是交接）', () => {
+  const same = swim.build([{ lane: '甲', main: 'a' }, { lane: '甲', main: 'b' }], {}, {}).svg;
+  const cross = swim.build([{ lane: '甲', main: 'a' }, { lane: '乙', main: 'b' }], {}, {}).svg;
+  /* defs 裡本來就有這個 marker，要問「有沒有被用到」而不是「存不存在」 */
+  const used = (svg) => svg.includes('marker-end="url(#ddg-arrow-accent)"');
+  assert.ok(!used(same), '同單位不該用強調色');
+  assert.ok(used(cross), '換單位沒有用強調色');
+});
+
+await t('泳道圖：沒填單位時放第一條泳道，並且講一聲', () => {
+  const out = swim.build([{ lane: '甲科', main: 'a' }, { lane: '', main: 'b' }], {}, {});
+  assert.equal(out.count, 2);
+  assert.equal(out.warnings.length, 1);
+  assert.match(out.warnings[0], /b/);
+});
+
+await t('泳道圖：步驟編號從 1 開始，看得出先後', () => {
+  const svg = swim.build([{ lane: '甲', main: 'a' }, { lane: '甲', main: 'b' }], {}, {}).svg;
+  const text = words(svg);
+  assert.ok(text.includes('1') && text.includes('2'));
+});
+
+/* ── 組織圖 ────────────────────────────────────────────────────────── */
+
+const org = G.byId('org');
+
+await t('組織圖：沒填上級的就是最上層', () => {
+  const out = org.build([{ name: '本處' }, { name: '甲科', parent: '本處' }], {}, {});
+  assert.equal(out.count, 2);
+  assert.deepEqual(out.warnings, []);
+});
+
+await t('組織圖：父節點置中在自己的子節點上方', () => {
+  const svg = org.build([
+    { name: '頭' }, { name: '左', parent: '頭' }, { name: '右', parent: '頭' }
+  ], {}, {}).svg;
+  const at = (name) => {
+    const before = svg.slice(0, svg.indexOf('>' + name + '<'));
+    const m = /<rect x="([\d.]+)"[^>]*width="([\d.]+)"/g;
+    let last = null, r;
+    while ((r = m.exec(before))) last = r;
+    return +last[1] + +last[2] / 2;
+  };
+  assert.ok(Math.abs(at('頭') - (at('左') + at('右')) / 2) < 1.5, '父節點沒有置中');
+  assert.ok(at('左') < at('右'), '子節點沒有由左而右');
+});
+
+await t('組織圖：上級指到後面（會繞成圈）時講清楚，不會當掉', () => {
+  const out = org.build([
+    { name: '甲', parent: '乙' }, { name: '乙' }
+  ], {}, {});
+  assert.equal(out.count, 2);
+  assert.match(out.warnings[0], /甲/);
+  assert.match(out.warnings[0], /不在它前面/);
+  /* 補一句「有幾個沒有上級」是對的：兩個都變成最上層，使用者要知道 */
+  assert.ok(out.warnings.length <= 2, out.warnings.join('／'));
+});
+
+await t('組織圖：上級指到自己也不會當掉', () => {
+  const out = org.build([{ name: '甲', parent: '甲' }], {}, {});
+  assert.equal(out.count, 1);
+  assert.equal(out.warnings.length, 1);
+});
+
+await t('組織圖：同名的單位要講一聲（不然「上級」分不出是哪一個）', () => {
+  const out = org.build([{ name: '甲' }, { name: '甲' }], {}, {});
+  assert.equal(out.count, 1);
+  assert.match(out.warnings[0], /兩次/);
+});
+
+await t('組織圖：單位很多時整張縮小，不會畫到框外', () => {
+  const rows = [{ name: '頭' }];
+  for (let i = 0; i < 14; i++) rows.push({ name: '單位' + i, parent: '頭' });
+  const out = org.build(rows, {}, {});
+  assert.equal(out.count, 15);
+  assert.ok(out.warnings.some((w) => /縮小/.test(w)), out.warnings.join('／'));
+  const xs = [];
+  const m = /<rect x="([\d.]+)"[^>]*width="([\d.]+)"/g;
+  let r;
+  while ((r = m.exec(out.svg))) xs.push(+r[1], +r[1] + +r[2]);
+  assert.ok(Math.min.apply(null, xs) >= 0, '有方塊畫到左邊界外');
+  assert.ok(Math.max.apply(null, xs) <= 1000, '有方塊畫到右邊界外');
+});
+
+/* ── 從 Excel 貼一整塊 ────────────────────────────────────────────── */
+
+await t('parsePasteRows：一行一列、一個 Tab 一欄', () => {
+  const res = G.parsePasteRows(G.byId('gantt'), '甲\t114/3/1\t114/3/5\t階段一\n乙\t114/4/1\t114/4/9\t階段二');
+  assert.equal(res.rows.length, 2);
+  assert.equal(res.rows[0].name, '甲');
+  assert.equal(res.rows[0].start, '114/3/1');
+  assert.equal(res.rows[1].phase, '階段二');
+  assert.deepEqual(res.warnings, []);
+});
+
+await t('parsePasteRows：勾選欄吃「是／Y／1／V／✓」這幾種寫法', () => {
+  const g = G.byId('gantt');
+  ['是', 'Y', 'y', '1', 'V', '✓', 'true'].forEach((v) => {
+    assert.equal(G.parsePasteRows(g, '甲\t114/3/1\t114/3/5\t\t' + v).rows[0].milestone, true, v);
+  });
+  ['', '否', '0', 'N'].forEach((v) => {
+    assert.equal(G.parsePasteRows(g, '甲\t114/3/1\t114/3/5\t\t' + v).rows[0].milestone, false, v);
+  });
+});
+
+await t('parsePasteRows：下拉欄位吃的是中文標籤，不是內部代號', () => {
+  const res = G.parsePasteRows(G.byId('flow'), '判斷\t要不要？\n步驟\t做事');
+  assert.equal(res.rows[0].kind, 'decision');
+  assert.equal(res.rows[1].kind, 'step');
+});
+
+await t('parsePasteRows：看不懂的下拉值退回第一個選項，不會生出壞掉的列', () => {
+  const res = G.parsePasteRows(G.byId('flow'), '亂打的\t甲');
+  assert.equal(res.rows[0].kind, 'step');
+});
+
+await t('parsePasteRows：欄位比需要的多時講一聲，並且說出欄位順序', () => {
+  const res = G.parsePasteRows(G.byId('layers'), '甲\t乙\t丙\t丁\t戊');
+  assert.equal(res.rows.length, 1);
+  assert.equal(res.warnings.length, 1);
+  assert.match(res.warnings[0], /層名/);
+});
+
+await t('parsePasteRows：只有一欄時就填第一個欄位', () => {
+  const res = G.parsePasteRows(G.byId('layers'), '甲\n乙\n丙');
+  assert.equal(res.rows.length, 3);
+  assert.equal(res.rows[2].name, '丙');
+});
+
+await t('parsePasteRows：空白行跳過，全空時講得出下一步', () => {
+  const res = G.parsePasteRows(G.byId('layers'), '甲\n\n   \n乙\n');
+  assert.equal(res.rows.length, 2);
+  const empty = G.parsePasteRows(G.byId('layers'), '   \n');
+  assert.equal(empty.rows.length, 0);
+  assert.match(empty.warnings[0], /Excel/);
+});
+
+/* ── 設定檔：下個月改一下日期再送一次 ─────────────────────────────── */
+
+await t('設定檔：存出再讀回來，內容一模一樣', () => {
+  const g = G.byId('gantt');
+  const json = G.buildGenProject({ type: 'gantt', typeName: '甘特圖', title: '期程', eyebrow: '甘特圖', rows: g.example, meta: {} });
+  const back = G.parseGenProject(json);
+  assert.equal(back.type, 'gantt');
+  assert.equal(back.title, '期程');
+  assert.equal(back.rows.length, g.example.length);
+  assert.equal(back.rows[0].name, g.example[0].name);
+  assert.equal(back.rows[3].milestone, true);
+});
+
+await t('設定檔：帶著來源標註（授權要求）', () => {
+  const json = G.buildGenProject({ type: 'layers', rows: [{ name: '甲' }], meta: {} });
+  assert.match(JSON.parse(json).source, /cathrynlavery\/diagram-design/);
+});
+
+await t('設定檔：壞掉的檔案每一種都講人話', () => {
+  const bad = [
+    ['不是 JSON', '{{{'],
+    ['不是本站的', '{"format":"別的"}'],
+    ['是範本改字用的', '{"format":"gongwu-diagram","version":1,"diagram":"x"}'],
+    ['版本太新', '{"format":"gongwu-diagram","kind":"generator","version":99}'],
+    ['圖表種類不存在', '{"format":"gongwu-diagram","kind":"generator","version":1,"type":"沒這種"}'],
+    ['一列都沒有', '{"format":"gongwu-diagram","kind":"generator","version":1,"type":"gantt","rows":[]}']
+  ];
+  bad.forEach(([why, text]) => {
+    let msg = '';
+    try { G.parseGenProject(text); } catch (e) { msg = e.message; }
+    assert.ok(msg, why + ' 應該要擋下來');
+    assert.ok(!/JSON\.parse|undefined|Unexpected token/.test(msg), why + ' 的訊息不是人話：' + msg);
+    assert.ok(/。$/.test(msg), why + ' 的訊息沒有講完：' + msg);
+  });
+});
+
+await t('設定檔：多餘的欄位丟掉、缺的欄位補空白（這是使用者給的輸入）', () => {
+  const json = JSON.stringify({
+    format: 'gongwu-diagram', kind: 'generator', version: 1, type: 'layers',
+    rows: [{ name: '甲', 亂加的: 'x' }, { focal: 'yes' }],
+    meta: { topLabel: '上', 亂加的: 'y' }
+  });
+  const back = G.parseGenProject(json);
+  assert.equal(back.rows.length, 2);
+  assert.equal(back.rows[0]['亂加的'], undefined);
+  assert.equal(back.rows[1].name, '');
+  assert.equal(back.rows[1].focal, true);
+  assert.equal(back.meta.topLabel, '上');
+  assert.equal(back.meta['亂加的'], undefined);
+});
+
+await t('設定檔：讀回來的內容真的畫得出圖', () => {
+  const g = G.byId('quadrant');
+  const json = G.buildGenProject({ type: 'quadrant', rows: g.example, meta: { xLabel: '投入', yLabel: '影響' } });
+  const back = G.parseGenProject(json);
+  const out = back.gen.build(back.rows, back.meta, {});
+  assert.equal(out.count, g.example.length);
+  assert.deepEqual(out.warnings, []);
 });
 
 s.finish();
