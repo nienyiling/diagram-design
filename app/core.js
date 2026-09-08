@@ -1318,6 +1318,7 @@
    *   opts.png    Uint8Array，給看不懂 SVG 的 Word 當後備
    *   opts.w／h   圖的原始寬高（px），用來換算 Word 裡的顯示尺寸
    *   opts.title  文件標題，也是圖片的替代文字
+   *   opts.credit false＝這張圖不是從上游範本來的，不要掛那個來源標註
    * 回傳 Uint8Array。
    */
   function buildDocx(opts) {
@@ -1366,10 +1367,11 @@
       '<w:rFonts w:ascii="DFKai-SB" w:eastAsia="標楷體" w:hAnsi="DFKai-SB"/>' +
       '<w:sz w:val="18"/><w:color w:val="7F7F7F"/></w:rPr>' +
       '<w:t xml:space="preserve">' + escapeXml(note) + '</w:t></w:r></w:p>' +
-      '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>' +
-      '<w:rFonts w:ascii="DFKai-SB" w:eastAsia="標楷體" w:hAnsi="DFKai-SB"/>' +
-      '<w:sz w:val="16"/><w:color w:val="A6A6A6"/></w:rPr>' +
-      '<w:t xml:space="preserve">' + escapeXml(SOURCE.credit) + '</w:t></w:r></w:p>' +
+      (o.credit === false ? '' :
+        '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>' +
+        '<w:rFonts w:ascii="DFKai-SB" w:eastAsia="標楷體" w:hAnsi="DFKai-SB"/>' +
+        '<w:sz w:val="16"/><w:color w:val="A6A6A6"/></w:rPr>' +
+        '<w:t xml:space="preserve">' + escapeXml(SOURCE.credit) + '</w:t></w:r></w:p>') +
       '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>' +
       '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" ' +
       'w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>' +
@@ -1419,8 +1421,9 @@
     return '<!doctype html>\n<html lang="zh-Hant">\n<head>\n<meta charset="utf-8">\n' +
       '<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
       '<title>' + name + '</title>\n' +
-      '<!-- 圖表範本來源：' + SOURCE.url + '（' + SOURCE.license + ' License, ' + SOURCE.author + '）\n' +
-      '     由「公務用圖表範本庫」改字產出。本檔零外部請求，可離線開啟。 -->\n' +
+      (o.credit === false ? '<!-- 本檔零外部請求，可離線開啟。 -->\n'
+        : '<!-- 圖表範本來源：' + SOURCE.url + '（' + SOURCE.license + ' License, ' + SOURCE.author + '）\n' +
+          '     由「公務用圖表範本庫」改字產出。本檔零外部請求，可離線開啟。 -->\n') +
       '<style>\n' +
       '  html,body{margin:0;padding:0;background:' + colors.paper + ';color:' + colors.ink + ';}\n' +
       '  body{font-family:' + FONTS.sans.replace(/'/g, '"') + ';padding:24px;}\n' +

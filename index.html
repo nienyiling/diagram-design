@@ -99,7 +99,7 @@
   .starter.make b{color:var(--seal);}
   .starter b{font-family:var(--serif); font-size:15.5px; font-weight:700;}
   .starter span{font-size:11.5px; color:var(--ink-soft); line-height:1.45;}
-  /* 首頁最上面：五種「自己做一張」的入口。縮圖是產生器自己畫出來的示意圖，
+  /* 首頁最上面：九個做圖入口。縮圖是產生器自己畫出來的示意圖，
      不是範本——使用者看到什麼，填完表就會得到什麼形狀的東西。 */
   .makes{display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px; margin-top:14px;}
   .make{display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line);
@@ -128,6 +128,13 @@
   .frow,.mrow{display:flex; gap:10px; align-items:flex-start; padding:12px 0;}
   .frow{border-top:1px solid var(--line-soft);}
   .frow:first-child{border-top:0;}
+  /* 一張表分兩段（成員／關係）：各自一個標題、各自一顆「＋」。
+     全部混在一條長表裡時，使用者看到的是「一列一列長得都不一樣」，很難懂。 */
+  .fgroup{margin:0 0 6px;}
+  .fgroup + .fgroup{margin-top:18px; padding-top:14px; border-top:2px solid var(--line);}
+  .fgroup > h3{margin:0 0 6px; font-size:15px; letter-spacing:.02em;}
+  .fgroup .flock{margin:0 0 8px; color:var(--ink-faint);}
+  .fadd{margin-top:10px;}
   .mrow{padding-bottom:4px;}
   .fno{flex:none; width:24px; padding-top:26px; font-size:12px; color:var(--ink-faint);
     font-variant-numeric:tabular-nums; text-align:right;}

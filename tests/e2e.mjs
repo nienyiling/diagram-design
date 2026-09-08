@@ -80,13 +80,13 @@ await t('首頁只有「你要做哪一種圖」，範本區預設收起來', as
   assert.equal(await page.locator('.source').isVisible(), true);
 });
 
-await t('首頁最上面就是八個「自己做一張」的入口，縮圖是產生器自己畫的', async () => {
+await t('首頁最上面就是九個做圖入口，縮圖是產生器自己畫的', async () => {
   const makes = page.locator('.make');
-  assert.equal(await makes.count(), 8, '八種產生器');
+  assert.equal(await makes.count(), 9, '九種產生器');
   assert.equal(await makes.first().getAttribute('href'), '#/make/flow');
   assert.ok((await makes.first().innerText()).includes('流程圖'));
   /* 縮圖不是圖片檔也不是範本，是產生器當場畫出來的 SVG */
-  assert.equal(await page.locator('.make .shot svg').count(), 8);
+  assert.equal(await page.locator('.make .shot svg').count(), 9);
 });
 
 await t('範本的快捷入口還在，只是退到收合區裡', async () => {
@@ -536,15 +536,16 @@ await t('不能轉 PNG 的範本，複製按鈕也一起停用', async () => {
   assert.equal(await page.locator('#copyPngBtn').isDisabled(), true);
 });
 
-/* ── 五種產生器：這是「範本只能換字」的解法 ─────────────────────────── */
+/* ── 九種產生器：這是「範本只能換字」的解法 ─────────────────────────── */
 
-await t('五種產生器都打得開，一進去就有一份公務情境的範例', async () => {
+await t('每一種產生器都打得開，一進去就有一份公務情境的範例', async () => {
   for (const [id, name, word] of [
     ['flow', '流程圖', '收到來文'],
     ['gantt', '甘特圖', '各科室需求訪談'],
     ['timeline', '時間軸', '修正草案預告'],
     ['layers', '分層堆疊圖', '受理與分辦'],
-    ['quadrant', '四象限圖', '線上申辦改版']
+    ['quadrant', '四象限圖', '線上申辦改版'],
+    ['relation', '關係圖', '國營事業']
   ]) {
     await page.goto(server.url + '#/make/' + id, { waitUntil: 'networkidle' });
     await page.locator('#stage svg').waitFor({ timeout: 5000 });
@@ -965,14 +966,54 @@ await t('從產生器回首頁，表單卡就收起來', async () => {
   assert.equal(await page.locator('#projBox').isVisible(), true, '範本模式要看得到設定檔');
 });
 
+/* ── 關係圖：方塊、線、線上的字 ─────────────────────────────────────── */
+
+await t('關係圖也分兩區塊：方塊填夠兩個之前，連線的「＋」是關起來的', async () => {
+  await page.goto(server.url + '#/make/relation', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  assert.deepEqual(await page.locator('.fgroup h3').allInnerTexts(), ['方塊', '連線']);
+
+  await page.locator('#makeClearBtn').click();
+  await page.waitForTimeout(400);
+  const addLink = page.locator('.fgroup').nth(1).locator('button.fadd');
+  assert.equal(await addLink.isDisabled(), true, '一個方塊都沒有就讓人拉線');
+  const note = page.locator('.fgroup').nth(1).locator('.flock');
+  assert.equal(await note.isVisible(), true, '關起來卻沒說為什麼');
+  assert.ok((await note.innerText()).includes('兩個'), await note.innerText());
+
+  /* 填滿兩個方塊，連線就開了 */
+  await page.locator('#f_relation_0_text').fill('甲單位');
+  await page.locator('.fgroup').first().locator('button.fadd').click();
+  await page.waitForTimeout(300);
+  await page.locator('#f_relation_1_text').fill('乙單位');
+  await page.waitForTimeout(500);
+  assert.equal(await addLink.isDisabled(), false, '填了兩個方塊還是不給拉線');
+});
+
+await t('關係圖：加一條連線，圖上就多一條線，線上的字也畫得出來', async () => {
+  await page.locator('.fgroup').nth(1).locator('button.fadd').click();
+  await page.waitForTimeout(400);
+  const lines = () => page.evaluate(() =>
+    document.querySelectorAll('#stage svg polyline').length);
+  await page.locator('#f_relation_2_from').selectOption('甲單位');
+  await page.locator('#f_relation_2_to').selectOption('乙單位');
+  await page.waitForTimeout(500);
+  assert.ok(await lines() >= 1, '拉了線圖上卻沒有');
+  await page.locator('#f_relation_2_label').fill('協辦');
+  await page.waitForTimeout(500);
+  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(svgText.includes('協辦'), '線上的字沒有出現在圖上：' + svgText.slice(0, 80));
+});
+
 /* ── 家系圖：社工用的 genogram ─────────────────────────────────────── */
 
 await t('家系圖打得開，一列可以是成員／伴侶關係／情感關係', async () => {
   await page.goto(server.url + '#/make/genogram', { waitUntil: 'networkidle' });
   await page.locator('#stage svg').waitFor({ timeout: 5000 });
   assert.ok((await page.locator('#makeTitle').innerText()).includes('家系圖'));
-  const kinds = await page.locator('#f_genogram_0_kind option').allInnerTexts();
-  assert.deepEqual(kinds, ['成員', '伴侶關係', '情感關係']);
+  /* 成員區塊裡不該再出現型別下拉；關係區塊的型別只列得到那兩種 */
+  assert.equal(await page.locator('#f_genogram_0_kind').count(), 0, '成員列還留著型別下拉');
+  assert.deepEqual(await page.locator('.fgroup h3').allInnerTexts(), ['成員', '關係']);
   const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
   ['祖父', '姑姑', '分居 85'].forEach((w) =>
     assert.ok(svgText.includes(w), '範例的圖上少了「' + w + '」：' + svgText.slice(0, 120)));
@@ -1056,7 +1097,7 @@ await t('家系圖沒有現成範本，就不要留一個死連結', async () =>
   assert.equal(await page.locator('#makeSampleWrap').isVisible(), true, '甘特圖有範本，連結該在');
 });
 
-await t('家系圖也下載得出來，而且一樣帶著來源標註', async () => {
+await t('家系圖下載得出來，而且不會掛上不相干的來源標註', async () => {
   await page.goto(server.url + '#/make/genogram', { waitUntil: 'networkidle' });
   await page.locator('#stage svg').waitFor({ timeout: 5000 });
   await page.locator('#edTitleIn').fill('Case 2026');
@@ -1068,7 +1109,22 @@ await t('家系圖也下載得出來，而且一樣帶著來源標註', async ()
   const text = fs.readFileSync(await download.path(), 'utf8');
   assert.ok(text.includes('Case 2026'));
   assert.ok(text.includes('姑姑'));
-  assert.ok(text.includes('cathrynlavery/diagram-design'));
+  /* 家系圖與關係圖在上游那 153 張裡沒有對應的範本，是自己畫的：
+     掛上游的來源等於引用了一個跟這張圖無關的出處 */
+  assert.ok(!text.includes('cathrynlavery/diagram-design'),
+    '自己畫的圖不該掛上游的來源標註');
+});
+
+await t('範本改字下載的那一份，來源標註照樣要在（授權要求）', async () => {
+  await page.goto(server.url + '#/make/gantt', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  await page.waitForTimeout(400);
+  const [dl] = await Promise.all([
+    page.waitForEvent('download', { timeout: 15000 }),
+    page.locator('#dlSvg').click()
+  ]);
+  assert.ok(fs.readFileSync(await dl.path(), 'utf8').includes('cathrynlavery/diagram-design'),
+    '有對應範本的那幾種，來源標註不可以掉');
 });
 
 /* ── 自由畫板：拖形狀、連線、改大小顏色 ─────────────────────────────── */
@@ -1423,8 +1479,8 @@ await t('資料檔掛掉時，畫面上看得見一句講得出下一步的錯�
   assert.ok(msg.includes('範本資料載不進來'), msg);
   assert.ok(msg.includes('file://'), '要講出「直接點開檔案不會動」這件事');
   assert.ok(msg.includes('照常可以用'), '要講清楚只有範本受影響');
-  /* 做圖那七種完全不需要範本資料，資料掛了它們還是要能用 */
-  assert.equal(await p2.locator('.make').count(), 8, '資料掛了就連做圖入口都不見了');
+  /* 做圖那九種完全不需要範本資料，資料掛了它們還是要能用 */
+  assert.equal(await p2.locator('.make').count(), 9, '資料掛了就連做圖入口都不見了');
   await p2.close();
 });
 

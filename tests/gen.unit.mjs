@@ -27,10 +27,10 @@ const buildExample = (gen) => gen.build(gen.example, defMeta(gen), {});
 
 /* ── 五種都要長得像同一種東西：規格是表單引擎照著長出畫面的依據 ────────── */
 
-await t('TYPES 是五種，id 不重複', () => {
-  assert.equal(G.TYPES.length, 8);
+await t('TYPES 是九種，id 不重複', () => {
+  assert.equal(G.TYPES.length, 9);
   assert.deepEqual(G.TYPES.map((g) => g.id),
-    ['flow', 'swimlane', 'org', 'genogram', 'gantt', 'timeline', 'layers', 'quadrant']);
+    ['flow', 'swimlane', 'org', 'relation', 'genogram', 'gantt', 'timeline', 'layers', 'quadrant']);
 });
 
 await t('每一種都有畫面要用的規格：名稱、用途、列名、欄位、範例、示意範本', () => {
@@ -82,7 +82,11 @@ await t('範例填的每一格文字都真的出現在圖上', () => {
         const v = String(row[f.key] || '').trim();
         /* 日期欄位圖上顯示的是民國年排版過的樣子，不是使用者原本打的字 */
         if (!v || G.parseTwDate(v)) return;
-        assert.ok(text.includes(v), g.id + ' 的圖上找不到「' + v + '」');
+        /* 「/」是使用者自己決定的斷行點，圖上本來就會拆成兩行 */
+        v.split('/').forEach((part) => {
+          const want = part.trim();
+          if (want) assert.ok(text.includes(want), g.id + ' 的圖上找不到「' + want + '」');
+        });
       });
     });
   });
@@ -614,6 +618,105 @@ await t('設定檔：讀回來的內容真的畫得出圖', () => {
   assert.deepEqual(out.warnings, []);
 });
 
+
+/* ── 關係圖：公文與簡報裡那種「示意圖」 ─────────────────────────────── */
+
+const rel = G.TYPES.find((g) => g.id === 'relation');
+const B = (text, extra) => Object.assign({ kind: 'box', text, line: 'solid', fill: 'paper' }, extra || {});
+const L = (from, to, extra) => Object.assign({ kind: 'link', from, to, style: 'solid', arrow: 'one' }, extra || {});
+const relSvg = (rows, meta) => rel.build(rows, meta || {}, {}).svg;
+/** 某個方塊的文字畫在哪個 y（方塊的排列順序看這個就夠了）。 */
+const relY = (svg, name) => {
+  const before = svg.slice(0, svg.indexOf('>' + name + '<'));
+  const m = /<text x="[\d.]+" y="([\d.]+)"/g;
+  let last = null, r;
+  while ((r = m.exec(before))) last = r;
+  return +last[1];
+};
+
+await t('關係圖：方塊的框線實線／虛線／無框畫出來不一樣', () => {
+  const solid = relSvg([B('甲')]);
+  const dashed = relSvg([B('甲', { line: 'dashed' })]);
+  const none = relSvg([B('甲', { line: 'none' })]);
+  assert.ok(!/<rect[^>]*rx="6"[^>]*stroke-dasharray/.test(solid), '實線不該是虛線');
+  assert.ok(/<rect[^>]*stroke-dasharray="6 4"/.test(dashed), '虛線框沒畫成虛線');
+  assert.ok(/<rect[^>]*stroke="none"/.test(none), '無框還畫了框線');
+});
+
+await t('關係圖：連線的實線／虛線、單向／雙向／不加箭頭都分得出來', () => {
+  const one = relSvg([B('甲'), B('乙'), L('甲', '乙')]);
+  const both = relSvg([B('甲'), B('乙'), L('甲', '乙', { arrow: 'both' })]);
+  const none = relSvg([B('甲'), B('乙'), L('甲', '乙', { arrow: 'none' })]);
+  const dashed = relSvg([B('甲'), B('乙'), L('甲', '乙', { style: 'dashed' })]);
+  assert.ok(/<polyline[^>]*marker-end/.test(one), '單向沒有箭頭');
+  assert.ok(!/<polyline[^>]*marker-start/.test(one), '單向不該有回頭的箭頭');
+  assert.ok(/<polyline[^>]*marker-start/.test(both), '雙向少了一頭');
+  assert.ok(!/<polyline[^>]*marker-(end|start)/.test(none), '說了不加箭頭還是加了');
+  assert.ok(/<polyline[^>]*stroke-dasharray="6 4"/.test(dashed), '虛線的連線沒畫成虛線');
+});
+
+await t('關係圖：線上的字畫得出來，而且墊了底色不會被線劃掉', () => {
+  const svg = relSvg([B('甲'), B('乙'), L('甲', '乙', { label: '體制內不衡平' })]);
+  assert.ok(words(svg).includes('體制內不衡平'), '線上的字不見了');
+  const at = svg.indexOf('體制內不衡平');
+  assert.ok(svg.lastIndexOf('<polyline', at) < svg.lastIndexOf('<rect', at),
+    '線上的字沒有墊底色（rect 要在字前面）');
+});
+
+await t('關係圖：文字太長會折行，打「/」就從那裡斷', () => {
+  const svg = relSvg([B('純勞工/（適用勞基法）')]);
+  const t2 = words(svg);
+  assert.ok(t2.includes('純勞工') && t2.includes('（適用勞基法）'), t2);
+  assert.ok(!t2.includes('純勞工/（適用勞基法）'), '「/」沒有當成斷行點');
+  /* 四個方塊一列時每格才窄，長文字就非折不可 */
+  const long = relSvg([B('這是一段很長很長很長很長很長很長很長很長很長的說明文字'),
+    B('乙'), B('丙'), B('丁')], { cols: '4' });
+  assert.ok((long.match(/<text/g) || []).length >= 5, '長文字沒有折行');
+});
+
+await t('關係圖：排滿一列就換下一列，勾「另起一列」可以提早換', () => {
+  const flat = relSvg([B('甲'), B('乙'), B('丙')], { cols: '3' });
+  assert.equal(relY(flat, '甲'), relY(flat, '丙'), '說了一列三個卻沒排在同一列');
+  const wrapped = relSvg([B('甲'), B('乙'), B('丙', { br: true })], { cols: '3' });
+  assert.ok(relY(wrapped, '丙') > relY(wrapped, '甲'), '勾了另起一列還是排在同一列');
+  const two = relSvg([B('甲'), B('乙'), B('丙')], { cols: '2' });
+  assert.ok(relY(two, '丙') > relY(two, '甲'), '一列兩個時第三個沒有換列');
+});
+
+await t('關係圖：「每列幾個」填了看不懂的字要講一聲，而且照樣畫得出來', () => {
+  const out = rel.build([B('甲'), B('乙')], { cols: '兩個' }, {});
+  assert.equal(out.warnings.length, 1);
+  assert.match(out.warnings[0], /兩個/);
+  assert.match(out.warnings[0], /自動/);
+  assert.ok(words(out.svg).includes('甲'), '有警告就不畫了，那使用者會以為壞掉');
+});
+
+await t('關係圖：連線指到不存在的方塊時講清楚是第幾條', () => {
+  const out = rel.build([B('甲'), L('甲', '沒這個方塊')], {}, {});
+  assert.equal(out.warnings.length, 1);
+  assert.match(out.warnings[0], /沒這個方塊/);
+  assert.match(out.warnings[0], /第 2 條/);
+});
+
+await t('關係圖：同名的方塊要講一聲（不然連線分不出是哪一個）', () => {
+  const out = rel.build([B('甲'), B('甲')], {}, {});
+  assert.equal(out.count, 1);
+  assert.match(out.warnings[0], /兩次/);
+});
+
+await t('關係圖：同一列的兩個方塊之間有字時，欄距要讓得下那句話', () => {
+  const boxOf = (svg) => {
+    const m = /<rect x="(\d+)" y="\d+" width="(\d+)"/g;
+    const out = [];
+    let r;
+    while ((r = m.exec(svg))) out.push({ x: +r[1], w: +r[2] });
+    return out;
+  };
+  const plain = boxOf(relSvg([B('甲'), B('乙'), L('甲', '乙')], { cols: '2' }));
+  const tagged = boxOf(relSvg([B('甲'), B('乙'), L('甲', '乙', { label: '這是一句很長的說明' })], { cols: '2' }));
+  const gap = (b) => b[1].x - (b[0].x + b[0].w);
+  assert.ok(gap(tagged) > gap(plain) + 40, '線上有字時欄距沒有讓開：' + gap(plain) + ' → ' + gap(tagged));
+});
 
 /* ── 家系圖 ────────────────────────────────────────────────────────
    社工用的 genogram。符號慣例是這一種圖的全部價值——畫錯符號等於畫錯意思，

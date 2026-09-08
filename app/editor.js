@@ -265,7 +265,8 @@
       eyebrow: el.edEyebrow.value,
       heading: el.edTitleIn.value,
       title: state.d.title,
-      colors: state.colors
+      colors: state.colors,
+      credit: state.credit
     });
   }
 
@@ -321,6 +322,7 @@
     step.then(function (r) {
       var bytes = DD.buildDocx({
         svg: svg, png: r.png, w: box.w, h: box.h,
+        credit: state.credit,
         title: el.edTitleIn.value.trim() || state.d.typeZh || '圖表'
       });
       download(new Blob([bytes], {
@@ -340,7 +342,8 @@
     show(el.dlErr, '');
     try {
       var html = DD.buildStandaloneHtml({
-        svg: composed(), heading: el.edTitleIn.value, title: state.d.title, colors: state.colors
+        svg: composed(), heading: el.edTitleIn.value, title: state.d.title,
+        colors: state.colors, credit: state.credit
       });
       download(new Blob([html], { type: 'text/html;charset=utf-8' }),
         DD.safeFilename(baseName(), 'html'));
@@ -576,6 +579,9 @@
         ' 段）；方塊裡的內容是範本自帶的示範資料，本來就要整段換掉。';
 
     state.flow = !!o.flow;
+    /* 上游那 153 張是別人畫的，授權要求要掛來源；自己填表產生的圖不是從那裡來的，
+       掛上去等於引用了一個跟這張圖無關的出處。 */
+    state.credit = o.credit !== false;
     el.textCard.hidden = state.flow;
     /* 產生器畫出來的圖本來就是中文，沒有「中文層」可言——那段說明留著只會讓人以為壞了 */
     if (state.flow) { el.zhRow.hidden = true; el.zhNote.textContent = ''; }

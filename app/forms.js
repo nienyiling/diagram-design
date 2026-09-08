@@ -48,12 +48,59 @@
     return gen.fields[0].key;
   }
 
-  function blankRow(gen) {
+  function blankRow(gen, kind) {
     var row = {};
     gen.fields.forEach(function (f) {
       row[f.key] = f.type === 'check' ? false : (f.type === 'select' ? f.options[0].value : '');
     });
+    if (kind) row.kind = kind;
     return row;
+  }
+
+  /* ── 區塊：一張表分成「成員」「關係」兩段 ───────────────────────────
+     一列可以是好幾種東西時（家系圖的成員／伴侶／情感關係），全部混在一張長表裡
+     很難懂：使用者看到的是「一列一列長得都不一樣」。descriptor 給 groups 就分段畫，
+     每一段自己一顆「＋」，而且可以要求「前一段先填夠幾列才准填這一段」。 */
+
+  function groupsOf(gen) {
+    return (gen && gen.groups && gen.groups.length) ? gen.groups : null;
+  }
+
+  function groupIndex(gen, row) {
+    var gs = groupsOf(gen);
+    if (!gs) return 0;
+    for (var i = 0; i < gs.length; i++) {
+      if (gs[i].kinds.indexOf(row.kind || gs[0].kinds[0]) >= 0) return i;
+    }
+    return 0;
+  }
+
+  /** 同一區塊的列要連在一起：下拉選單只列得到「前面幾列」，成員排在關係後面就選不到了。 */
+  function sortByGroup(gen, rows) {
+    if (!groupsOf(gen)) return rows;
+    return rows.map(function (r, i) { return { r: r, i: i, g: groupIndex(gen, r) }; })
+      .sort(function (a, b) { return a.g - b.g || a.i - b.i; })
+      .map(function (x) { return x.r; });
+  }
+
+  /** 這一區塊已經填了幾列（有主要文字的才算）——「還能不能往下填」看的是這個。 */
+  function filledIn(gen, rows, kinds) {
+    var mk = mainKey(gen);
+    return rows.filter(function (r) {
+      return kinds.indexOf(r.kind) >= 0 && String(r[mk] || '').trim();
+    }).length;
+  }
+
+  /** 這一區塊有幾列真的填了東西——關係那種列沒有主要文字，要看它自己的欄位。 */
+  function countIn(gen, rows, kinds) {
+    return rows.filter(function (r) {
+      if (kinds.indexOf(r.kind) < 0) return false;
+      return gen.fields.some(function (f) {
+        if (f.type === 'check' || f.key === 'kind') return false;
+        if (f.only && f.only !== r.kind) return false;
+        return String(r[f.key] || '').trim();
+      });
+    }).length;
   }
 
   function defaultState(gen) {
@@ -65,7 +112,11 @@
 
   function stateFor(gen) {
     if (!store[gen.id]) store[gen.id] = defaultState(gen);
-    return store[gen.id];
+    var st = store[gen.id];
+    /* 分區塊的圖：同區塊的列一定要連在一起。載回設定檔、貼上、還原都可能打亂順序，
+       在這裡收斂一次，其它地方就不必各自記得。 */
+    if (groupsOf(gen)) st.rows = sortByGroup(gen, st.rows);
+    return st;
   }
 
   /* ── 留住使用者填的東西 ──────────────────────────────────────────── */
@@ -138,7 +189,7 @@
 
   /* ── 表單 ────────────────────────────────────────────────────────── */
 
-  function fieldNode(gen, f, row, i, st) {
+  function fieldNode(gen, f, row, i, st, group) {
     var wrap = document.createElement('div');
     wrap.className = 'fcell';
     /* 有指定寬度的是窄欄位（日期、分數、勾選）；沒有的是主要文字，窄螢幕要獨佔一行 */
@@ -155,13 +206,17 @@
     var input;
     if (f.type === 'select') {
       input = document.createElement('select');
-      f.options.forEach(function (o) {
+      /* 型別欄在區塊裡只列這個區塊有的那幾種：關係區塊不該還能選回「成員」 */
+      var opts = (group && f.key === 'kind')
+        ? f.options.filter(function (o) { return group.kinds.indexOf(o.value) >= 0; })
+        : f.options;
+      opts.forEach(function (o) {
         var op = document.createElement('option');
         op.value = o.value;
         op.textContent = o.label;
         input.appendChild(op);
       });
-      input.value = row[f.key] == null ? f.options[0].value : String(row[f.key]);
+      input.value = row[f.key] == null ? opts[0].value : String(row[f.key]);
     } else if (f.type === 'rowref') {
       input = document.createElement('select');
       var none = document.createElement('option');
@@ -225,41 +280,59 @@
     return wrap;
   }
 
+  /** 畫面上的編號從「自己這一區塊」數起：關係區塊的第一列就該寫 1，不是 8。 */
+  function ordinalIn(gen, rows, i) {
+    if (!groupsOf(gen)) return i + 1;
+    var g = groupIndex(gen, rows[i]), n = 0;
+    for (var j = 0; j <= i; j++) if (groupIndex(gen, rows[j]) === g) n++;
+    return n;
+  }
+
   function rowNode(gen, row, i, st) {
     var box = document.createElement('div');
     box.className = 'frow';
 
     var no = document.createElement('div');
     no.className = 'fno';
-    no.textContent = i + 1;
+    no.textContent = ordinalIn(gen, st.rows, i);
     box.appendChild(no);
+
+    var gs = groupsOf(gen);
+    var g = gs ? gs[groupIndex(gen, row)] : null;
+    var sameGroup = function (j) {
+      return st.rows[j] && (!gs || groupIndex(gen, st.rows[j]) === groupIndex(gen, row));
+    };
+    var mine = gs ? st.rows.filter(function (r) { return groupIndex(gen, r) === groupIndex(gen, row); }).length : st.rows.length;
+    var rowName = (g && g.rowName) || gen.rowName;
 
     var fields = document.createElement('div');
     fields.className = 'ffields';
     gen.fields.forEach(function (f) {
       if (f.only && row.kind !== f.only) return;
-      fields.appendChild(fieldNode(gen, f, row, i, st));
+      /* 區塊只有一種列時，型別欄就沒有意義了——留著只是多一個看不懂的下拉 */
+      if (g && f.key === 'kind' && g.kinds.length < 2) return;
+      fields.appendChild(fieldNode(gen, f, row, i, st, g));
     });
     box.appendChild(fields);
 
     var btns = document.createElement('div');
     btns.className = 'fbtns';
-    [['↑', '上移', function () { swap(i, i - 1); }, i === 0],
-     ['↓', '下移', function () { swap(i, i + 1); }, i === st.rows.length - 1],
+    [['↑', '上移', function () { swap(i, i - 1); }, !sameGroup(i - 1)],
+     ['↓', '下移', function () { swap(i, i + 1); }, !sameGroup(i + 1)],
      ['✕', '刪除這一列', function () {
        snapshot();
        st.rows.splice(i, 1);
        persist();
        buildForm();
-       showTip('刪掉第 ' + (i + 1) + ' ' + gen.rowName + '了。按「復原」可以救回來。');
-     }, st.rows.length <= 1]]
+       showTip('刪掉一' + rowName + '了。按「復原」可以救回來。');
+     }, gs ? (groupIndex(gen, row) === 0 && mine <= 1) : st.rows.length <= 1]]
       .forEach(function (b) {
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'ficon';
         btn.textContent = b[0];
-        btn.title = b[1] + '（第 ' + (i + 1) + ' ' + gen.rowName + '）';
-        btn.setAttribute('aria-label', b[1] + '：第 ' + (i + 1) + ' ' + gen.rowName);
+        btn.title = b[1] + '（第 ' + ordinalIn(gen, st.rows, i) + ' ' + rowName + '）';
+        btn.setAttribute('aria-label', b[1] + '：第 ' + ordinalIn(gen, st.rows, i) + ' ' + rowName);
         btn.disabled = b[3];
         btn.addEventListener('click', b[2]);
         btns.appendChild(btn);
@@ -283,13 +356,90 @@
     show(el.makeTip, msg || '');
   }
 
+  /** 一個區塊：標題、屬於它的那幾列、自己的「＋」。前一段沒填夠就把「＋」關起來。 */
+  function groupNode(gen, g, gi, st) {
+    var box = document.createElement('section');
+    box.className = 'fgroup';
+
+    var h = document.createElement('h3');
+    h.textContent = g.title;
+    box.appendChild(h);
+
+    /* 這一段先建起來，鎖不鎖等 refreshLocks() 決定——打字時只重畫預覽、不重建表單
+       （重建會讓游標跳走），所以鎖的狀態要能單獨更新。 */
+    var note = document.createElement('p');
+    note.className = 'hint flock';
+    note.setAttribute('data-lock', g.id);
+    note.textContent = (g.needs && g.needs.msg) || '';
+    box.appendChild(note);
+
+    var rows = document.createElement('div');
+    st.rows.forEach(function (row, i) {
+      if (groupIndex(gen, row) !== gi) return;
+      rows.appendChild(rowNode(gen, row, i, st));
+    });
+    box.appendChild(rows);
+
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'primary fadd';
+    add.textContent = g.add;
+    add.setAttribute('data-add', g.id);
+    add.addEventListener('click', function () {
+      snapshot();
+      var at = st.rows.length;
+      for (var j = st.rows.length - 1; j >= 0; j--) {
+        if (groupIndex(gen, st.rows[j]) <= gi) { at = j + 1; break; }
+        if (j === 0) at = 0;
+      }
+      st.rows.splice(at, 0, blankRow(gen, g.kinds[0]));
+      persist();
+      buildForm();
+      focusRow(at);
+    });
+    box.appendChild(add);
+    return box;
+  }
+
+  /** 前一段填夠了沒——只切按鈕與那句說明，不動表單其它地方，游標才不會跳走。 */
+  function refreshLocks() {
+    var gen = cur;
+    var gs = groupsOf(gen);
+    if (!gs) return;
+    var st = stateFor(gen);
+    gs.forEach(function (g) {
+      var add = el.makeRows.querySelector('[data-add="' + g.id + '"]');
+      var note = el.makeRows.querySelector('[data-lock="' + g.id + '"]');
+      if (!add) return;
+      var locked = !!(g.needs && filledIn(gen, st.rows, g.needs.kinds) < g.needs.min);
+      add.disabled = locked;
+      if (locked) add.title = g.needs.msg; else add.removeAttribute('title');
+      if (note) note.hidden = !locked;
+    });
+  }
+
+  /** 新加的那一列要看得見、游標要在裡面——不然使用者以為按了沒反應。 */
+  function focusRow(at) {
+    var all = el.makeRows.querySelectorAll('.frow');
+    var node = all[Math.min(at, all.length - 1)];
+    if (!node) return;
+    if (node.scrollIntoView) node.scrollIntoView({ block: 'center' });
+    var input = node.querySelector('input[type=text], select');
+    if (input) input.focus();
+  }
+
   function buildForm() {
     var gen = cur;
     var st = stateFor(gen);
-    if (!st.rows.length) st.rows.push(blankRow(gen));
+    var gs0 = groupsOf(gen);
+    /* 第一個區塊至少要有一列，不然畫面上只剩兩個標題，看起來像壞了 */
+    if (!st.rows.length) st.rows.push(blankRow(gen, gs0 ? gs0[0].kinds[0] : ''));
+    else if (gs0 && groupIndex(gen, st.rows[0]) !== 0) st.rows.unshift(blankRow(gen, gs0[0].kinds[0]));
 
     el.makeTitle.textContent = '填' + gen.name + '的內容';
-    el.makeRowsLabel.textContent = '每一列是一個「' + gen.rowName + '」，由上往下就是圖上的順序。';
+    el.makeRowsLabel.textContent = groupsOf(gen) ? ''
+      : '每一列是一個「' + gen.rowName + '」，由上往下就是圖上的順序。';
+    el.makeRowsLabel.hidden = !el.makeRowsLabel.textContent;
 
     el.makeHelp.innerHTML = '';
     (gen.help || []).forEach(function (line) {
@@ -326,9 +476,19 @@
 
     el.makeRows.innerHTML = '';
     var frag = document.createDocumentFragment();
-    st.rows.forEach(function (row, i) { frag.appendChild(rowNode(gen, row, i, st)); });
+    var gs = groupsOf(gen);
+    if (gs) {
+      gs.forEach(function (g, gi) {
+        frag.appendChild(groupNode(gen, g, gi, st));
+      });
+    } else {
+      st.rows.forEach(function (row, i) { frag.appendChild(rowNode(gen, row, i, st)); });
+    }
     el.makeRows.appendChild(frag);
+    refreshLocks();
 
+    /* 分區塊時每一區塊自己有一顆「＋」，共用的那一顆就沒有意義了 */
+    el.makeAddBtn.hidden = !!gs;
     el.makeAddBtn.textContent = '＋ 加一' + (gen.rowName.length > 1 ? '個' : '') + gen.rowName;
     el.makePasteHint.textContent = '欄位順序是：' +
       GEN.pasteKeys(gen).map(function (k) {
@@ -358,8 +518,18 @@
       return;
     }
     show(el.makeErr, out.warnings.join('\n'));
-    el.makeCount.textContent = out.count
-      ? '目前 ' + out.count + ' 個' + gen.rowName + '。改上面的欄位，右邊的圖就跟著變。'
+    /* 剛打完第二個成員的名字，「新增關係」就該亮起來——不必先按別的地方 */
+    refreshLocks();
+    /* 分區塊時分開數：「目前 11 個列」看不出是六個方塊五條線 */
+    var gsC = groupsOf(gen);
+    var tally = gsC
+      ? gsC.map(function (g) {
+        return countIn(gen, st.rows, g.kinds) + ' ' + (g.unit || '個') + (g.rowName || gen.rowName);
+      })
+        .filter(function (x) { return x.indexOf('0 ') !== 0; }).join('、')
+      : (out.count ? out.count + ' 個' + gen.rowName : '');
+    el.makeCount.textContent = tally
+      ? '目前 ' + tally + '。改上面的欄位，右邊的圖就跟著變。'
       : '還沒有畫得出來的內容。照著範例填，或按「填入範例」。';
 
     var box = DD.parseViewBox(out.svg) || { w: 1000, h: 600 };
@@ -388,6 +558,8 @@
     }, {
       flow: true,
       keepTitle: true,
+      /* 上游那 153 張裡有對應範本的才掛來源；家系圖、關係圖是自己畫的，掛了等於亂引用 */
+      credit: !!gen.sample,
       genHeading: gen.name,
       genUse: gen.use + '　版面由程式排，你只要把內容填對。'
     });
@@ -500,7 +672,8 @@
     });
     el.makeClearBtn.addEventListener('click', function () {
       snapshot();
-      stateFor(cur).rows = [blankRow(cur)];
+      var gs = groupsOf(cur);
+      stateFor(cur).rows = [blankRow(cur, gs ? gs[0].kinds[0] : '')];
       persist();
       buildForm();
       showTip('已全部清空。按「復原」可以救回剛才填的內容。');

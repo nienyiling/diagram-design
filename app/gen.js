@@ -42,7 +42,10 @@
       '<marker id="ddg-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">' +
       '<polygon points="0 0, 8 3, 0 6" fill="' + C.muted + '"/></marker>' +
       '<marker id="ddg-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">' +
-      '<polygon points="0 0, 8 3, 0 6" fill="' + C.accent + '"/></marker></defs>' +
+      '<polygon points="0 0, 8 3, 0 6" fill="' + C.accent + '"/></marker>' +
+      /* 雙向箭頭的那一頭：refX 要放在 0 那一端，不然箭頭會凸出線的起點外面 */
+      '<marker id="ddg-arrow-back" markerWidth="8" markerHeight="6" refX="1" refY="3" orient="auto">' +
+      '<polygon points="8 0, 0 3, 8 6" fill="' + C.muted + '"/></marker></defs>' +
       '<rect width="100%" height="100%" fill="' + C.paper + '"/>' +
       '<rect width="100%" height="100%" fill="url(#ddg-dots)" opacity="0.55"/>';
   }
@@ -1022,14 +1025,16 @@
     sampleTitle: '個案家庭關係圖',
     rowName: '列',
     help: [
-      '一列可以是「成員」「伴侶關係」或「情感關係」，用最左邊的型別欄分。',
-      '後兩種不是人，只是把兩個「已經填過的成員」連起來，所以那兩種列沒有姓名、性別、年齡欄。',
-      '成員只要填「父親是誰、母親是誰」，世代與手足位置由程式算，不必自己排。',
+      '先填寫成員，填寫完畢後再選擇關係。',
       '父母只能選前面已經填過的成員，所以由上而下（祖父母 → 父母 → 子女）填最順。',
-      '符號照慣例：男□、女○、性別不明◇、案主雙框、已歿打叉；一男一女的伴侶男左女右。',
-      '同性伴侶照樣畫得出來：符號各依各自的性別，位置照你填的順序（沒有男左女右可套）。',
-      '再婚只要多填一列伴侶關係：結過兩次的那一位會自動排到中間，前一段在左、後面的在右。',
-      '情感關係是另外一層，用強調色畫在成員之間（親近雙線、衝突鋸齒、斷絕兩撇）。'
+      '符號：男□、女○、性別不明◇、案主雙框、已歿打叉；一男一女的伴侶男左女右。'
+    ],
+    /* 一張表分兩段：成員填完才輪到關係。三種列全混在一條長表裡時，
+       使用者看到的是「一列一列長得都不一樣」，第一個問的就是「這是什麼意思」。 */
+    groups: [
+      { id: 'member', title: '成員', rowName: '成員', kinds: ['person'], add: '＋ 新增成員' },
+      { id: 'link', title: '關係', rowName: '關係', kinds: ['union', 'bond'], add: '＋ 新增關係',
+        needs: { kinds: ['person'], min: 2, msg: '先填兩位以上的成員，才能建立關係。' } }
     ],
     fields: [
       /* 124px：104 的話「伴侶關係」四個字會被下拉箭頭壓到 */
@@ -1038,13 +1043,13 @@
       /* 姓名只有「成員」那種列才有意義。不加 only 的話，伴侶關係那一列上面會杵著一個
          填了也不會怎樣的姓名欄，整列看起來就像「一個沒有年齡的人」——使用者第一個問的就是這個。
          （而且填進去的字會跑進後面幾列的下拉選單裡，變成一個根本不存在的成員。） */
-      { key: 'name', label: '姓名／稱謂', type: 'text', placeholder: '案主', only: 'person' },
+      { key: 'name', label: '姓名／稱謂', type: 'text', only: 'person' },
       { key: 'sex', label: '性別', type: 'select', options: SEX_OPTIONS, width: '88px', only: 'person' },
-      { key: 'age', label: '年齡', type: 'text', placeholder: '16', width: '84px', only: 'person' },
+      { key: 'age', label: '年齡', type: 'text', width: '84px', only: 'person' },
       { key: 'father', label: '父親', type: 'rowref', width: '150px', only: 'person' },
       { key: 'mother', label: '母親', type: 'rowref', width: '150px', only: 'person' },
       { key: 'childType', label: '與父母', type: 'select', options: CHILD_OPTIONS, width: '104px', only: 'person' },
-      { key: 'note', label: '註記（可留空）', type: 'text', placeholder: '國中三年級', only: 'person' },
+      { key: 'note', label: '註記（可留空）', type: 'text', only: 'person' },
       { key: 'index', label: '案主', type: 'check', width: '72px', only: 'person',
         hint: '案主畫成雙框，一張圖標一個' },
       { key: 'dead', label: '已歿', type: 'check', width: '72px', only: 'person',
@@ -1054,7 +1059,7 @@
       { key: 'a', label: '伴侶', type: 'rowref', width: '160px', only: 'union' },
       { key: 'b', label: '和哪一位', type: 'rowref', width: '160px', only: 'union' },
       { key: 'union', label: '狀態', type: 'select', options: UNION_OPTIONS, width: '116px', only: 'union' },
-      { key: 'year', label: '年份（可留空）', type: 'text', placeholder: '85', width: '128px', only: 'union' },
+      { key: 'year', label: '年份（可留空）', type: 'text', width: '128px', only: 'union' },
 
       { key: 'ba', label: '成員', type: 'rowref', width: '160px', only: 'bond' },
       { key: 'bb', label: '和哪一位', type: 'rowref', width: '160px', only: 'bond' },
@@ -1748,7 +1753,270 @@
 
   /* ── 對外 ───────────────────────────────────────────────────────── */
 
-  var TYPES = [flowGen, swimlaneGen, orgGen, genogramGen, ganttGen, timelineGen, layersGen, quadrantGen];
+  /* ══ 關係圖 ═══════════════════════════════════════════════════════════
+     公文與簡報裡最常出現的那種「示意圖」：幾個方塊，中間拉幾條線，
+     線上寫一句話。方塊可實線可虛線，線可實可虛、可加箭頭。
+
+     刻意不做成「相互關係圖非得排成環狀」：真實的公務示意圖幾乎都是格狀
+     （四個職域一排、上下兩層），環狀只有在「每個都跟每個有關」時才好看。
+     排法由「每列幾個」與各方塊的「另起一列」決定，程式不猜。 */
+
+  var BOX_LINE_OPTIONS = [
+    { value: 'solid', label: '實線' },
+    { value: 'dashed', label: '虛線' },
+    { value: 'none', label: '無框' }
+  ];
+  var BOX_FILL_OPTIONS = [
+    { value: 'paper', label: '白底' },
+    { value: 'soft', label: '淺灰' },
+    { value: 'accent', label: '強調' }
+  ];
+  var LINK_LINE_OPTIONS = [
+    { value: 'solid', label: '實線' },
+    { value: 'dashed', label: '虛線' }
+  ];
+  var LINK_ARROW_OPTIONS = [
+    { value: 'one', label: '單向 →' },
+    { value: 'both', label: '雙向 ↔' },
+    { value: 'none', label: '不加箭頭' }
+  ];
+  var REL_KIND_OPTIONS = [
+    { value: 'box', label: '方塊' },
+    { value: 'link', label: '連線' }
+  ];
+
+  var REL = { W: 1000, left: 40, top: 70, gapX: 26, gapY: 58, minH: 54, fs: 13, pad: 14 };
+
+  /** 方塊的底與框：三種框線 × 三種底色，其它產生器換配色時也吃得到這四個色票。 */
+  function relBoxStyle(row) {
+    var line = optValue(BOX_LINE_OPTIONS, row.line);
+    var fill = optValue(BOX_FILL_OPTIONS, row.fill);
+    return {
+      stroke: line === 'none' ? 'none' : (fill === 'accent' ? C.accent : C.ink),
+      dash: line === 'dashed' ? ' stroke-dasharray="6 4"' : '',
+      bg: fill === 'accent' ? 'rgba(235,108,54,0.12)' : (fill === 'soft' ? 'rgba(79,93,117,0.10)' : C.paper),
+      text: C.ink
+    };
+  }
+
+  var relationGen = {
+    id: 'relation',
+    name: '關係圖',
+    use: '幾個方塊、幾條線：誰跟誰有關係、是什麼關係。線可實可虛、可加箭頭、線上可以寫字。',
+    sampleTitle: '各職域人員比較示意圖',
+    rowName: '列',
+    help: [
+      '先填方塊，填寫完畢後再拉連線。',
+      '方塊由左而右排，排滿一列就換下一列；要提早換列就勾「另起一列」。',
+      '文字太長會自動折行，想自己決定在哪裡斷，就在要斷的地方打一個「/」。'
+    ],
+    groups: [
+      { id: 'box', title: '方塊', rowName: '方塊', kinds: ['box'], add: '＋ 新增方塊' },
+      { id: 'link', title: '連線', rowName: '連線', unit: '條', kinds: ['link'], add: '＋ 新增連線',
+        needs: { kinds: ['box'], min: 2, msg: '先填兩個以上的方塊，才能拉連線。' } }
+    ],
+    fields: [
+      { key: 'kind', label: '型別', type: 'select', options: REL_KIND_OPTIONS, width: '104px' },
+
+      { key: 'text', label: '方塊裡的文字', type: 'text', only: 'box' },
+      { key: 'line', label: '框線', type: 'select', options: BOX_LINE_OPTIONS, width: '104px', only: 'box' },
+      { key: 'fill', label: '底色', type: 'select', options: BOX_FILL_OPTIONS, width: '104px', only: 'box' },
+      { key: 'br', label: '另起一列', type: 'check', width: '92px', only: 'box',
+        hint: '這個方塊改從下一列的最左邊開始排' },
+
+      { key: 'from', label: '從', type: 'rowref', width: '170px', only: 'link' },
+      { key: 'to', label: '到', type: 'rowref', width: '170px', only: 'link' },
+      { key: 'style', label: '線型', type: 'select', options: LINK_LINE_OPTIONS, width: '104px', only: 'link' },
+      { key: 'arrow', label: '箭頭', type: 'select', options: LINK_ARROW_OPTIONS, width: '118px', only: 'link' },
+      { key: 'label', label: '線上的字（可留空）', type: 'text', only: 'link' }
+    ],
+    meta: [
+      { key: 'cols', label: '每列幾個方塊（留空＝自動）', type: 'text' }
+    ],
+    example: [
+      { kind: 'box', text: '國營事業', line: 'solid', fill: 'soft' },
+      { kind: 'box', text: '民間公司', line: 'solid', fill: 'soft' },
+      { kind: 'box', text: '純勞工/（適用勞基法）', line: 'solid', fill: 'paper', br: true },
+      { kind: 'box', text: '公兼勞/（適用公務人員規定）', line: 'solid', fill: 'paper' },
+      { kind: 'box', text: '同時支領退休金及撫卹金', line: 'solid', fill: 'accent', br: true },
+      { kind: 'box', text: '僅支領撫卹金', line: 'dashed', fill: 'paper' },
+      { kind: 'link', from: '國營事業', to: '純勞工/（適用勞基法）', style: 'solid', arrow: 'one', label: '' },
+      { kind: 'link', from: '民間公司', to: '公兼勞/（適用公務人員規定）', style: 'solid', arrow: 'one', label: '' },
+      { kind: 'link', from: '純勞工/（適用勞基法）', to: '同時支領退休金及撫卹金', style: 'solid', arrow: 'one', label: '' },
+      { kind: 'link', from: '公兼勞/（適用公務人員規定）', to: '僅支領撫卹金', style: 'dashed', arrow: 'one', label: '' },
+      { kind: 'link', from: '同時支領退休金及撫卹金', to: '僅支領撫卹金', style: 'dashed', arrow: 'both', label: '體制內不衡平' }
+    ],
+    build: function (rows, meta, opts) {
+      var warnings = [];
+      var boxes = [];
+      var links = [];
+      var byText = {};
+      var used = 0;
+
+      (rows || []).forEach(function (row, i) {
+        var kind = row.kind === 'link' ? 'link' : 'box';
+        if (kind === 'box') {
+          var t = String(row.text || '').trim();
+          if (!t) return;
+          if (byText[t] != null) {
+            warnings.push('「' + t + '」出現了兩次。方塊的文字要不一樣，' +
+              '不然連線的「從」「到」分不出你指的是哪一個。');
+            return;
+          }
+          byText[t] = boxes.length;
+          used++;
+          boxes.push({ text: t, br: !!row.br, style: relBoxStyle(row) });
+          return;
+        }
+        var a = String(row.from || '').trim(), b = String(row.to || '').trim();
+        if (!a && !b && !String(row.label || '').trim()) return;
+        used++;
+        links.push({ line: i + 1, aName: a, bName: b,
+          style: optValue(LINK_LINE_OPTIONS, row.style),
+          arrow: optValue(LINK_ARROW_OPTIONS, row.arrow),
+          label: String(row.label || '').trim() });
+      });
+
+      if (!boxes.length) {
+        return { svg: emptyCanvas('在左邊的「方塊」區塊填幾個方塊，再到「連線」拉線。'),
+          warnings: warnings, count: 0 };
+      }
+
+      /* ── 排列：由左而右填滿一列再換下一列 ───────────────────────── */
+      var want = parseInt(String((meta && meta.cols) || '').replace(/[^\d]/g, ''), 10);
+      if (String((meta && meta.cols) || '').trim() && !(want >= 1)) {
+        warnings.push('「每列幾個方塊」要填一個 1 以上的數字，' +
+          '填的是「' + meta.cols + '」，先當成自動排。');
+      }
+      var perRow = want >= 1 ? Math.min(want, 6)
+        : (boxes.length <= 3 ? boxes.length : (boxes.length <= 6 ? 3 : 4));
+
+      var lines = [], cur = [];
+      boxes.forEach(function (b, i) {
+        if (i && (b.br || cur.length >= perRow)) { lines.push(cur); cur = []; }
+        cur.push(b);
+      });
+      if (cur.length) lines.push(cur);
+
+      var widest = lines.reduce(function (m, r) { return Math.max(m, r.length); }, 1);
+      var avail = REL.W - REL.left * 2;
+
+      /* 同一列的兩個方塊之間有字時，欄距要讓得下那句話——不然「體制內不衡平」
+         會擠在 26px 的縫裡，兩邊都壓到方塊上。 */
+      var rowOf = {};
+      lines.forEach(function (r, n) { r.forEach(function (b) { rowOf[b.text] = n; }); });
+      var needGap = REL.gapX;
+      links.forEach(function (l) {
+        if (!l.label) return;
+        var ra = rowOf[l.aName], rb = rowOf[l.bName];
+        if (ra == null || rb == null || ra !== rb) return;
+        needGap = Math.max(needGap, Math.round(DD.textUnits(l.label) * 10) + 20);
+      });
+      var gapX = Math.min(needGap, Math.floor(avail / (widest + 1)));
+
+      var bw = Math.floor((avail - (widest - 1) * gapX) / widest);
+      var maxChars = Math.max(4, (bw - REL.pad * 2) / REL.fs);
+
+      /* 折行：使用者打的「/」是自己決定的斷點，其餘照寬度折 */
+      boxes.forEach(function (b) {
+        b.lines = [];
+        String(b.text).split(/\s*\/\s*/).forEach(function (part) {
+          var got = DD.wrapLabel(part, maxChars);
+          b.lines = b.lines.concat(got.length ? got : ['']);
+        });
+      });
+
+      var y = REL.top;
+      lines.forEach(function (rowBoxes) {
+        var h = rowBoxes.reduce(function (m, b) {
+          return Math.max(m, REL.minH, b.lines.length * (REL.fs * 1.45) + REL.pad * 2);
+        }, REL.minH);
+        var rowW = rowBoxes.length * bw + (rowBoxes.length - 1) * gapX;
+        var x = Math.round((REL.W - rowW) / 2);
+        rowBoxes.forEach(function (b) {
+          b.x = x; b.y = y; b.w = bw; b.h = Math.round(h);
+          b.cx = x + bw / 2; b.cy = y + h / 2;
+          x += bw + gapX;
+        });
+        y += Math.round(h) + REL.gapY;
+      });
+      var H = y - REL.gapY + 34;
+
+      /* ── 畫 ──────────────────────────────────────────────────────── */
+      var out = [canvasOpen(H, '關係圖')];
+      var labels = [];
+
+      links.forEach(function (l) {
+        var ia = byText[l.aName], ib = byText[l.bName];
+        if (ia == null || ib == null || ia === ib) {
+          warnings.push('第 ' + l.line + ' 條連線的「' + (l.aName || '（空白）') + '」與「' +
+            (l.bName || '（空白）') + '」有一邊不是已經填過的方塊，這條線畫不出來。');
+          return;
+        }
+        var a = boxes[ia], b = boxes[ib];
+        var dash = l.style === 'dashed' ? ' stroke-dasharray="6 4"' : '';
+        var head = (l.arrow === 'one' || l.arrow === 'both') ? ' marker-end="url(#ddg-arrow)"' : '';
+        var tail = l.arrow === 'both' ? ' marker-start="url(#ddg-arrow-back)"' : '';
+        var pts = relRoute(a, b);
+        out.push('<polyline points="' + pts.map(function (p) {
+          return r1(p[0]) + ',' + r1(p[1]);
+        }).join(' ') + '" fill="none" stroke="' + C.muted + '" stroke-width="1.4"' +
+          dash + head + tail + '/>');
+        if (l.label) {
+          var mid = relMid(pts);
+          labels.push(paperBox(mid[0], mid[1], l.label, 10) +
+            text(mid[0], mid[1], l.label, { fill: C.muted, size: 10, anchor: 'middle' }));
+        }
+      });
+
+      /* 方塊最後畫：線可能從旁邊擦過去，先畫就會被壓在下面 */
+      boxes.forEach(function (b) {
+        var st = b.style;
+        out.push('<rect x="' + b.x + '" y="' + b.y + '" width="' + b.w + '" height="' + b.h +
+          '" rx="6" fill="' + st.bg + '" stroke="' + st.stroke + '" stroke-width="1.4"' + st.dash + '/>');
+        var top = b.cy - (b.lines.length - 1) * (REL.fs * 1.45) / 2 + REL.fs * 0.36;
+        b.lines.forEach(function (ln, i) {
+          out.push(text(b.cx, top + i * (REL.fs * 1.45), ln,
+            { fill: st.text, size: REL.fs, weight: '600', anchor: 'middle' }));
+        });
+      });
+      /* 線上的字要壓在所有線之上，不然被後畫的線劃掉就看不懂了 */
+      out.push(labels.join(''));
+      out.push('</svg>');
+
+      return { svg: out.join(''), warnings: warnings, count: used };
+    }
+  };
+
+  /** 兩個方塊之間怎麼走：同一列走直線，不同列先垂直再水平再垂直。 */
+  function relRoute(a, b) {
+    var sameRow = Math.abs(a.cy - b.cy) < 4;
+    if (sameRow) {
+      var l = a.cx < b.cx ? a : b, r = a.cx < b.cx ? b : a;
+      var from = a.cx < b.cx ? [l.x + l.w, l.cy] : [r.x, r.cy];
+      var to = a.cx < b.cx ? [r.x, r.cy] : [l.x + l.w, l.cy];
+      return [from, to];
+    }
+    var up = b.cy < a.cy;
+    var y1 = up ? a.y : a.y + a.h;
+    var y2 = up ? b.y + b.h : b.y;
+    if (Math.abs(a.cx - b.cx) < 4) return [[a.cx, y1], [b.cx, y2]];
+    var mid = (y1 + y2) / 2;
+    return [[a.cx, y1], [a.cx, mid], [b.cx, mid], [b.cx, y2]];
+  }
+
+  /** 線上的字放在最長那一段的中點——放在轉角會壓到轉折看不清楚。 */
+  function relMid(pts) {
+    var best = 0, bestLen = -1;
+    for (var i = 0; i < pts.length - 1; i++) {
+      var dx = pts[i + 1][0] - pts[i][0], dy = pts[i + 1][1] - pts[i][1];
+      var len = Math.abs(dx) + Math.abs(dy);
+      if (len > bestLen) { bestLen = len; best = i; }
+    }
+    return [(pts[best][0] + pts[best + 1][0]) / 2, (pts[best][1] + pts[best + 1][1]) / 2 - 5];
+  }
+
+  var TYPES = [flowGen, swimlaneGen, orgGen, relationGen, genogramGen, ganttGen, timelineGen, layersGen, quadrantGen];
 
   function byId(id) {
     for (var i = 0; i < TYPES.length; i++) if (TYPES[i].id === id) return TYPES[i];
