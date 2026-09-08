@@ -714,6 +714,34 @@ await t('關係圖：橫式的每一欄垂直置中，短的那一欄不會吊�
     '右欄沒有垂直置中：' + relY(svg, '丙') + ' vs ' + mid);
 });
 
+await t('關係圖 → 畫板：座標沿用預覽算好的那一份，一個都不會跑掉', () => {
+  const rows = [B('甲'), B('乙', { line: 'dashed' }), B('丙', { line: 'none', fill: 'accent' }),
+    L('甲', '乙', { label: '協辦', style: 'dashed' })];
+  const meta = { dir: 'down', cols: '3' };
+  const board = G.relationBoard(rows, meta);
+  assert.equal(board.shapes.length, 3);
+  assert.equal(board.links.length, 1);
+  /* 框線與底色要對得上畫板那五種形狀 */
+  assert.deepEqual(board.shapes.map((s2) => s2.kind), ['step', 'note', 'label']);
+  assert.deepEqual(board.shapes.map((s2) => s2.color), ['plain', 'plain', 'accent']);
+  assert.equal(board.links[0].label, '協辦');
+  assert.equal(board.links[0].dash, true);
+  /* 座標要跟預覽的那張圖一模一樣——重算一次就會差幾個像素，看起來像搬過去圖跑掉了 */
+  const svg = relSvg(rows, meta);
+  const rects = [...svg.matchAll(/<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/g)]
+    .map((m) => ({ x: +m[1], y: +m[2], w: +m[3], h: +m[4] }));
+  board.shapes.forEach((s2, i) => {
+    assert.deepEqual({ x: s2.x, y: s2.y, w: s2.w, h: s2.h }, rects[i], '第 ' + (i + 1) + ' 個方塊的座標對不上');
+  });
+});
+
+await t('關係圖 → 畫板：連線指不到方塊時就不要留一條指不到東西的線', () => {
+  const board = G.relationBoard([B('甲'), L('甲', '沒這個方塊')], {});
+  assert.equal(board.shapes.length, 1);
+  assert.deepEqual(board.links, []);
+  assert.deepEqual(G.relationBoard([], {}), { shapes: [], links: [] });
+});
+
 await t('關係圖：「每列幾個」填了看不懂的字要講一聲，而且照樣畫得出來', () => {
   const out = rel.build([B('甲'), B('乙')], { dir: 'down', cols: '兩個' }, {});
   assert.equal(out.warnings.length, 1);

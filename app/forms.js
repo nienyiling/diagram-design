@@ -662,7 +662,7 @@
       'makeTip', 'makeSample', 'makeSampleWrap', 'makePasteBox', 'makePasteBtn', 'makePasteAddBtn', 'makePasteErr',
       'makePasteHint', 'makeSaveBtn', 'makeLoadInput',
       'edTitleIn', 'edEyebrow', 'paletteSel', 'fontSel',
-      'toBoardWrap', 'toBoardBtn', 'blankBoardBtn']
+      'toBoardWrap', 'toBoardHint', 'toBoardBtn', 'blankBoardBtn']
       .forEach(function (id) { el[id] = $(id); });
 
     restore();
@@ -706,15 +706,26 @@
       var st = stateFor(cur);
       var out = cur.build(st.rows, st.meta, {});
       if (!out.count) { showTip('現在還沒有畫得出來的內容，先填幾列再搬。'); return; }
+      /* 關係圖搬過去會掉東西（畫板的線只有單向箭頭），要先講，不要讓人以為壞掉 */
+      var lose = cur.id === 'relation'
+        ? '\n畫板的線只有單向箭頭：雙向會變單向，「不加箭頭」也會長出箭頭。\n'
+        : '';
       var ok = window.confirm('要把這張圖搬到畫板嗎？\n\n' +
         '搬過去之後每一格都拖得動、可以改形狀和顏色，\n' +
-        '但**不能再搬回填表畫面**（畫板記的是座標，表單記的是順序）。\n\n' +
+        '但**不能再搬回填表畫面**（畫板記的是座標，表單記的是順序）。\n' + lose + '\n' +
         '填表這邊的內容會留著，隨時可以回來重新產生一次。');
       if (!ok) return;
-      window.DDCanvas.seed(flowNodes(st.rows));
+      if (cur.id === 'relation') {
+        window.DDCanvas.seedBoard(GEN.relationBoard(st.rows, st.meta), cur);
+      } else {
+        window.DDCanvas.seed(flowNodes(st.rows));
+      }
       location.hash = '#/board';
     });
-    el.blankBoardBtn.addEventListener('click', function () { location.hash = '#/board'; });
+    el.blankBoardBtn.addEventListener('click', function () {
+      window.DDCanvas.setOrigin(cur);
+      location.hash = '#/board';
+    });
     el.makePasteBtn.addEventListener('click', function () { applyPaste(true); });
     el.makePasteAddBtn.addEventListener('click', function () { applyPaste(false); });
     el.makeSaveBtn.addEventListener('click', saveProject);
@@ -768,7 +779,14 @@
     cur = gen;
     el.makeCard.hidden = false;
     /* 畫板現在只吃流程圖的形狀，其他幾種搬過去沒有意義 */
-    el.toBoardWrap.hidden = gen.id !== 'flow';
+    /* 畫板現在有兩種來源：流程圖與關係圖。其它種類的版面是算出來的，搬過去沒有意義 */
+    el.toBoardWrap.hidden = gen.id !== 'flow' && gen.id !== 'relation';
+    if (!el.toBoardWrap.hidden) {
+      el.toBoardHint.innerHTML = '<strong>想自己擺位置？</strong>' + gen.name +
+        '還有另一種畫法：<strong>畫板</strong>——自己拖形狀、自己連線、' +
+        '自己改大小顏色，線會黏在形狀上。';
+      el.toBoardBtn.textContent = '把這張圖搬到畫板繼續改 →';
+    }
     /* 有些種類（例如家系圖）在上游那 153 張範本裡沒有對應的，就不要留一個死連結 */
     el.makeSampleWrap.hidden = !gen.sample;
     if (gen.sample) {

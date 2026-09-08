@@ -30,6 +30,9 @@
   var UNDO_MAX = 40;
 
   var el = {};
+  /* 這塊畫板是從哪一種圖搬過來的——影響標題、回去的路與麵包屑 */
+  var origin = '流程圖';
+  var originId = 'flow';
   var board = { shapes: [], links: [] };
   var undo = [];
   var sel = null;          /* 選取中的形狀 id */
@@ -59,7 +62,10 @@
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
       try {
-        window.localStorage.setItem(STORE_KEY, JSON.stringify(board));
+        /* 連「從哪一種圖搬過來的」一起存：不然重開分頁之後，關係圖搬來的畫板
+           會叫使用者「回流程圖的填表畫面」 */
+        window.localStorage.setItem(STORE_KEY, JSON.stringify(
+          { shapes: board.shapes, links: board.links, origin: origin, originId: originId }));
       } catch (e) { /* 無痕模式或空間滿了：不影響現在這一趟操作 */ }
     }, 400);
   }
@@ -69,8 +75,13 @@
     try { raw = window.localStorage.getItem(STORE_KEY); } catch (e) { return; }
     if (!raw) return;
     try {
-      var got = B.normBoard(JSON.parse(raw));
-      if (got.shapes.length) board = got;
+      var saved = JSON.parse(raw);
+      var got = B.normBoard(saved);
+      if (got.shapes.length) {
+        board = got;
+        if (saved.origin) origin = String(saved.origin);
+        if (saved.originId) originId = String(saved.originId);
+      }
     } catch (e) { /* 上一版寫的、或壞掉了：當作沒有 */ }
   }
 
@@ -359,15 +370,17 @@
     var svg = B.renderBoard(board, { grid: false, title: el.edTitleIn.value || '自己畫的圖' });
     var box = DD.parseViewBox(svg) || { w: B.W, h: 600 };
     window.DDEditor.open({
-      id: 'board', type: 'board', typeZh: '流程圖', variantZh: '自己畫的',
+      id: 'board', type: 'board', typeZh: origin, variantZh: '自己畫的',
       use: '自己拖形狀、自己連線', variant: '', dark: false,
-      title: '自己畫的圖', eyebrow: '流程圖', heading: '', desc: '',
+      title: '自己畫的圖', eyebrow: origin, heading: '', desc: '',
       w: box.w, h: box.h, png: true, segs: 0,
-      zhKind: '', zhCount: 0, zhHeading: '', zhEyebrow: '流程圖', zh: null,
+      zhKind: '', zhCount: 0, zhHeading: '', zhEyebrow: origin, zh: null,
       svg: svg
     }, {
       flow: true, keepTitle: true,
-      genHeading: '自己畫一張流程圖',
+      /* 畫板的圖是自己畫的，不是從上游那 153 張範本改來的 */
+      credit: false,
+      genHeading: origin + '（自己畫的）',
       genUse: '拖形狀、連線、改字改色。線黏在形狀上，拖動方塊時線會跟著跑。'
     });
   }
@@ -423,7 +436,7 @@
   /* ── 對外 ────────────────────────────────────────────────────────── */
 
   function init() {
-    ['bdCard', 'bdStage', 'bdTools', 'bdCount', 'bdTip', 'bdErr', 'bdPanel', 'bdNoSel',
+    ['bdCard', 'bdTitle', 'bdBack', 'bdStage', 'bdTools', 'bdCount', 'bdTip', 'bdErr', 'bdPanel', 'bdNoSel',
       'bdText', 'bdSub', 'bdKind', 'bdColor', 'bdSize', 'bdSizeOut', 'bdDelBtn',
       'bdLinkBtn', 'bdLinks', 'bdLinksWrap', 'bdUndoBtn', 'bdClearBtn',
       'bdSaveBtn', 'bdLoadInput', 'edTitleIn', 'edEyebrow', 'paletteSel', 'fontSel']
@@ -525,8 +538,19 @@
 
   /** 從填表產生的那張圖搬進畫板。單向門，所以呼叫端要先問過使用者。 */
   function seed(nodes) {
+    put(B.boardFromFlow(nodes), '流程圖', 'flow');
+  }
+
+  /** 已經算好的一份畫板（關係圖是這樣搬過來的）。 */
+  function seedBoard(raw, gen) {
+    put(B.normBoard(raw), (gen && gen.name) || '流程圖', (gen && gen.id) || 'flow');
+  }
+
+  function put(next, name, id) {
     snapshot();
-    board = B.boardFromFlow(nodes);
+    board = next;
+    origin = name;
+    originId = id || 'flow';
     sel = null;
     persist();
     paint();
@@ -534,11 +558,21 @@
       '每一格都拖得動了。改完不能再回到填表畫面。');
   }
 
+  /** 開空白畫板時要跟著切：從關係圖按進來的空白畫板不該叫人回流程圖。 */
+  function setOrigin(gen) {
+    origin = (gen && gen.name) || '流程圖';
+    originId = (gen && gen.id) || 'flow';
+    persist();
+  }
+
   function open() {
     el.bdCard.hidden = false;
+    /* 標題與「回填表畫面」都要指回它自己那一種，不然從關係圖搬過來會叫人回流程圖 */
+    el.bdTitle.textContent = '畫板（自己畫' + origin + '）';
+    el.bdBack.href = '#/make/' + originId;
     if (!el.edTitleIn.value || el.edTitleIn.dataset.gen !== 'board') {
       el.edTitleIn.value = '自己畫的圖';
-      el.edEyebrow.value = '流程圖';
+      el.edEyebrow.value = origin;
       el.edTitleIn.dataset.gen = 'board';
     }
     refreshUndo();
@@ -549,7 +583,8 @@
   function close() { if (el.bdCard) el.bdCard.hidden = true; }
 
   window.DDCanvas = {
-    init: init, open: open, close: close, seed: seed,
+    init: init, open: open, close: close, seed: seed, seedBoard: seedBoard,
+    setOrigin: setOrigin,
     _board: function () { return board; },
     _select: function (id) { sel = id; paint(); },
     _paint: paint

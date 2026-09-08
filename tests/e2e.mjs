@@ -1032,6 +1032,35 @@ await t('關係圖：加一條連線，圖上就多一條線，線上的字也�
   assert.ok(svgText.includes('協辦'), '線上的字沒有出現在圖上：' + svgText.slice(0, 80));
 });
 
+await t('關係圖也搬得進畫板，而且回去的路指的是關係圖不是流程圖', async () => {
+  const p2 = await newPage(ctx);
+  p2.on('dialog', (d) => d.accept());
+  await p2.goto(server.url + '#/make/relation', { waitUntil: 'networkidle' });
+  await p2.locator('#stage svg').waitFor({ timeout: 5000 });
+  /* 前面的測試可能已經改過關係圖的內容（表單存在 localStorage 裡），先放回範例 */
+  await p2.locator('#makeExampleBtn').click();
+  await p2.waitForTimeout(500);
+  assert.ok((await p2.locator('#toBoardHint').innerText()).includes('關係圖'),
+    '搬到畫板那段說明還在講流程圖');
+  await p2.locator('#toBoardBtn').click();
+  await p2.waitForTimeout(900);
+  assert.equal(await p2.evaluate(() => location.hash), '#/board');
+  assert.ok((await p2.locator('#bdTitle').innerText()).includes('關係圖'), '畫板的標題沒跟著換');
+  assert.equal(await p2.locator('#bdBack').getAttribute('href'), '#/make/relation',
+    '「回填表畫面」指到別種圖去了');
+  assert.ok((await p2.locator('#edKind').innerText()).includes('關係圖'), '麵包屑沒跟著換');
+  /* 搬過去的那張圖要跟填表那邊一模一樣：範例是六個方塊、五條線 */
+  const got = await p2.evaluate(() => window.DDCanvas._board());
+  assert.equal(got.shapes.length, 6, '搬過去的形狀數對不上');
+  assert.equal(got.links.length, 5, '搬過去的線數對不上');
+  assert.ok(got.shapes.some((s2) => s2.text.includes('國營事業')), '字掉了');
+  assert.ok(got.shapes.some((s2) => s2.kind === 'note'), '虛線框沒有變成「註記」');
+  /* 畫板的內容存在 localStorage 裡，是整個瀏覽器共用的：不清掉的話
+     後面那一段畫板測試會撿到這裡搬過去的那張圖 */
+  await p2.evaluate(() => window.localStorage.removeItem('gongwu-diagram-board-v1'));
+  await p2.close();
+});
+
 /* ── 家系圖：社工用的 genogram ─────────────────────────────────────── */
 
 await t('家系圖打得開，一列可以是成員／伴侶關係／情感關係', async () => {
@@ -1203,6 +1232,10 @@ await t('畫板是從流程圖裡進去的，首頁沒有它自己的入口（�
 
 await t('畫板打得開，工具列是照 board.js 的規格長出來的', async () => {
   await page.goto(server.url + '#/board', { waitUntil: 'networkidle' });
+  /* 畫板的內容存在 localStorage，是整個瀏覽器共用的：前面任何一項測試搬過一張圖進來，
+     下面這一整段就會從別人的圖開始。清乾淨再重載，這一段才跟順序無關。 */
+  await page.evaluate(() => window.localStorage.removeItem('gongwu-diagram-board-v1'));
+  await page.reload({ waitUntil: 'networkidle' });
   await page.locator('#bdStage svg').waitFor({ timeout: 5000 });
   assert.equal(await page.locator('#bdCard').isVisible(), true);
   const names = await page.evaluate(() => window.DDBoard.KINDS.map((k) => k.name));
@@ -1438,7 +1471,7 @@ await t('其他六種圖沒有「搬到畫板」那個按鈕（搬過去沒有�
   assert.equal(await page.locator('#toBoardWrap').isVisible(), false);
 });
 
-await t('畫板的圖下載得出來，而且一樣帶著來源標註', async () => {
+await t('畫板的圖下載得出來，而且不會掛上不相干的來源標註', async () => {
   await page.goto(server.url + '#/board', { waitUntil: 'networkidle' });
   await page.locator('#bdStage svg').waitFor({ timeout: 5000 });
   await page.locator('#edTitleIn').fill('Board 2026');
@@ -1449,7 +1482,9 @@ await t('畫板的圖下載得出來，而且一樣帶著來源標註', async ()
   ]);
   const text = fs.readFileSync(await download.path(), 'utf8');
   assert.ok(text.includes('Board 2026'));
-  assert.ok(text.includes('cathrynlavery/diagram-design'));
+  /* 畫板上的每一個形狀都是使用者自己拖出來的，跟上游那 153 張範本無關 */
+  assert.ok(!text.includes('cathrynlavery/diagram-design'),
+    '自己畫的圖不該掛上游的來源標註');
   assert.ok(!text.includes('url(#ddb-grid)'), '匯出的圖不該有格線');
 });
 
