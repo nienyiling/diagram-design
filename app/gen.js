@@ -1026,6 +1026,7 @@
       '成員只要填「父親是誰、母親是誰」，世代與手足位置由程式算，不必自己排。',
       '父母只能選前面已經填過的成員，所以由上而下（祖父母 → 父母 → 子女）填最順。',
       '符號照慣例：男□、女○、性別不明◇、案主雙框、已歿打叉；伴侶男左女右。',
+      '再婚只要多填一列伴侶關係：結過兩次的那一位會自動排到中間，前一段在左、後面的在右。',
       '情感關係是另外一層，用強調色畫在成員之間（親近雙線、衝突鋸齒、斷絕兩撇）。'
     ],
     fields: [
@@ -1223,9 +1224,15 @@
           people[i].spouses.forEach(function (s) {
             if (people[s].gen === g && !placed[s] && unit.indexOf(s) < 0) unit.push(s);
           });
-          /* 慣例：男左女右。兩個人的時候才調，三個以上（再婚）維持填的順序 */
+          /* 慣例：男左女右。兩個人的時候才調 */
           if (unit.length === 2 && people[unit[0]].sex === 'f' && people[unit[1]].sex === 'm') {
             unit = [unit[1], unit[0]];
+          }
+          /* 再婚：結過兩次以上的那一位排中間，前一段在左、後面的往右接。
+             照填的順序一路往右排的話，「他跟第二任」那條線會從「第一任」頭上跨過去。 */
+          if (unit.length > 2) {
+            var others = unit.slice(1);
+            unit = [others[0], i].concat(others.slice(1));
           }
           var width = unit.length * GENO.size + (unit.length - 1) * GENO.coupleGap;
           var mid = null;
@@ -1282,28 +1289,41 @@
         var x1 = left.px + sz, x2 = right.px;
         if (x2 < x1) { x1 = right.px + sz; x2 = left.px; y = right.cy; }
         var dash = (u.status === 'cohabit' || u.status === 'ended') ? ' stroke-dasharray="6 4"' : '';
-        out.push('<line x1="' + r1(x1) + '" y1="' + r1(y) + '" x2="' + r1(x2) + '" y2="' + r1(y) +
-          '" stroke="' + C.ink + '" stroke-width="1.3"' + dash + '/>');
 
-        var mx = (x1 + x2) / 2;
+        /* 兩人中間卡著別人時（再婚三段以上，或配偶早就被排到別處），伴侶線要繞到上面走。
+           直接連過去的話，線會從中間那個人的符號正中央穿過，看起來像他也在這段婚姻裡。 */
+        var block = unionBlockers(people, u, x1, x2, sz);
+        var linkY = y, mx = (x1 + x2) / 2;
+        if (block.length) {
+          linkY = Math.min(left.py, right.py) - 18;
+          out.push('<polyline points="' + r1(x1) + ',' + r1(y) + ' ' + r1(x1) + ',' + r1(linkY) +
+            ' ' + r1(x2) + ',' + r1(linkY) + ' ' + r1(x2) + ',' + r1(y) +
+            '" fill="none" stroke="' + C.ink + '" stroke-width="1.3"' + dash + '/>');
+          /* 標記與子女線改走空隙，不然會蓋在中間那個人的頭上 */
+          mx = clearDropX(block, x1, x2, sz);
+        } else {
+          out.push('<line x1="' + r1(x1) + '" y1="' + r1(y) + '" x2="' + r1(x2) + '" y2="' + r1(y) +
+            '" stroke="' + C.ink + '" stroke-width="1.3"' + dash + '/>');
+        }
+
         /* 分居一撇、離婚兩撇——這是家系圖上最要緊的一個資訊 */
         var slashes = u.status === 'separated' ? 1 : (u.status === 'divorced' ? 2 : 0);
         for (var n = 0; n < slashes; n++) {
           var sx = mx + (n - (slashes - 1) / 2) * 9;
-          out.push('<line x1="' + r1(sx - 5) + '" y1="' + r1(y + 8) + '" x2="' + r1(sx + 5) +
-            '" y2="' + r1(y - 8) + '" stroke="' + C.ink + '" stroke-width="1.3"/>');
+          out.push('<line x1="' + r1(sx - 5) + '" y1="' + r1(linkY + 8) + '" x2="' + r1(sx + 5) +
+            '" y2="' + r1(linkY - 8) + '" stroke="' + C.ink + '" stroke-width="1.3"/>');
         }
         if (u.status !== 'implied') {
           /* 標籤留到最後才畫：情感關係的弧線常常從這裡擦過去，先畫會被蓋掉 */
           var tag = optLabel(UNION_OPTIONS, u.status) + (u.year ? ' ' + u.year : '');
-          unionTags.push(paperBox(mx, y - 12, tag, 8.5) +
-            text(mx, y - 12, tag, { fill: C.muted, size: 8.5, font: F.mono, anchor: 'middle' }));
+          unionTags.push(paperBox(mx, linkY - 12, tag, 8.5) +
+            text(mx, linkY - 12, tag, { fill: C.muted, size: 8.5, font: F.mono, anchor: 'middle' }));
         }
 
         /* 這一對的子女：從伴侶線中點垂下，再一條手足橫線 */
         var mine = kids[pairKey(u.a, u.b)];
         if (!mine || !mine.length) return;
-        drawChildren(out, people, mine, mx, y, sz);
+        drawChildren(out, people, mine, mx, linkY, sz);
         delete kids[pairKey(u.a, u.b)];
       });
 
@@ -1357,6 +1377,35 @@
     if (p.mother >= 0) xs.push(people[p.mother].x + GENO.size / 2);
     if (!xs.length) return null;
     return xs.reduce(function (a, b) { return a + b; }, 0) / xs.length;
+  }
+
+  /** 這一對之間卡著哪些人：同一代、又橫在兩個符號中間的。 */
+  function unionBlockers(people, u, x1, x2, sz) {
+    var ga = people[u.a].gen, gb = people[u.b].gen, out = [];
+    people.forEach(function (p, i) {
+      if (i === u.a || i === u.b) return;
+      if (p.gen !== ga && p.gen !== gb) return;
+      if (p.px + sz > x1 + 1 && p.px < x2 - 1) out.push(p);
+    });
+    return out;
+  }
+
+  /** 繞上去之後，子女線從哪裡垂下來：挑靠近另一半那一側的空隙。
+      挑中間的空隙會直接穿過中間那個人自己的婚姻線，兩條結構線交叉在一起就看不出誰是誰的。
+      那一段太窄時才退回「最寬的一段」。 */
+  function clearDropX(block, x1, x2, sz) {
+    var gaps = [], cursor = x1;
+    block.slice().sort(function (p, q) { return p.px - q.px; }).forEach(function (p) {
+      if (p.px - 8 > cursor) gaps.push([cursor, p.px - 8]);
+      cursor = Math.max(cursor, p.px + sz + 8);
+    });
+    if (x2 > cursor) gaps.push([cursor, x2]);
+    if (!gaps.length) return (x1 + x2) / 2;
+    var pick = gaps[gaps.length - 1];
+    if (pick[1] - pick[0] < 24) {
+      gaps.forEach(function (g) { if (g[1] - g[0] > pick[1] - pick[0]) pick = g; });
+    }
+    return (pick[0] + pick[1]) / 2;
   }
 
   /** 子女：伴侶線中點垂下 → 手足橫線 → 各自垂下。長子在左（照填的順序）。 */

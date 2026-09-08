@@ -624,6 +624,14 @@ const genoSvg = (rows) => geno.build(rows, {}, {}).svg;
 const P = (name, extra) => Object.assign({ kind: 'person', name, sex: 'm' }, extra || {});
 /** 圖例本身也會畫一次符號與關係線，數東西時要先把它切掉，不然會多算一份。 */
 const genoBody = (svg) => svg.slice(0, svg.indexOf('>圖例<') >= 0 ? svg.lastIndexOf('<line', svg.indexOf('>圖例<')) : svg.length);
+/** 某個人的符號中心 x：名字是畫在 cx 上的，取它前面最後一個 <text 的 x。 */
+const genoCx = (svg, name) => {
+  const re = /<text x="([\d.]+)"/g;
+  let last = null, r;
+  const before = svg.slice(0, svg.indexOf('>' + name + '<'));
+  while ((r = re.exec(before))) last = r;
+  return +last[1];
+};
 
 await t('家系圖：男是方形、女是圓形、性別不明是菱形', () => {
   assert.ok(/<rect[^>]*width="46"/.test(genoSvg([P('甲', { sex: 'm' })])), '男不是方形');
@@ -687,6 +695,39 @@ await t('家系圖：伴侶男左女右（慣例）', () => {
     return +last[1];
   };
   assert.ok(cx('先生') < cx('太太'), '男沒有排在左邊');
+});
+
+await t('家系圖：再婚時結過兩次的那一位排中間（前任在左、現任在右）', () => {
+  /* 照填的順序一路往右排的話，「父與繼母」那條線會從「前妻」頭上跨過去，
+     看起來像前妻也在那段婚姻裡——再婚的家系圖最常畫錯的就是這裡。 */
+  const svg = genoSvg([
+    P('父'), P('前妻', { sex: 'f' }), P('繼母', { sex: 'f' }),
+    { kind: 'union', a: '父', b: '前妻', union: 'divorced', year: '108' },
+    { kind: 'union', a: '父', b: '繼母', union: 'married', year: '110' }
+  ]);
+  assert.ok(genoCx(svg, '前妻') < genoCx(svg, '父'), '前任沒有排在左邊');
+  assert.ok(genoCx(svg, '父') < genoCx(svg, '繼母'), '現任沒有排在右邊');
+  /* 兩段都跟隔壁相鄰，就不必繞路 */
+  assert.ok(!new RegExp('<polyline[^>]*stroke="' + DD.UPSTREAM_LIGHT.ink + '"').test(genoBody(svg)),
+    '兩段婚姻各自相鄰，不該還要繞路');
+});
+
+await t('家系圖：中間卡著人的婚姻線要繞到上面走，不從別人的符號正中間穿過', () => {
+  const out = geno.build([
+    P('父'), P('第一任', { sex: 'f' }), P('第二任', { sex: 'f' }), P('第三任', { sex: 'f' }),
+    { kind: 'union', a: '父', b: '第一任', union: 'divorced' },
+    { kind: 'union', a: '父', b: '第二任', union: 'divorced' },
+    { kind: 'union', a: '父', b: '第三任', union: 'married' },
+    P('么女', { sex: 'f', father: '父', mother: '第三任' })
+  ], {}, {});
+  assert.deepEqual(out.warnings, []);
+  const body = genoBody(out.svg);
+  const m = new RegExp('<polyline points="([^"]+)"[^>]*stroke="' + DD.UPSTREAM_LIGHT.ink + '"').exec(body);
+  assert.ok(m, '三段婚姻沒有一條繞路的線');
+  /* 繞過去的那一段要高過符號本身，不然還是從人身上穿過去 */
+  const top = +/<rect x="[\d.]+" y="([\d.]+)"[^>]*width="46"/.exec(body)[1];
+  const ys = m[1].trim().split(/\s+/).map((pt) => +pt.split(',')[1]);
+  assert.ok(Math.min(...ys) < top, '繞路的線沒有走到符號上面：' + m[1]);
 });
 
 await t('家系圖：分居畫一撇、離婚畫兩撇（這是最要緊的一個資訊）', () => {
