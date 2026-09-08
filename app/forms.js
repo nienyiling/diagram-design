@@ -471,7 +471,7 @@
   function init() {
     ['makeCard', 'makeTitle', 'makeHelp', 'makeMeta', 'makeMetaWrap', 'makeRows', 'makeRowsLabel',
       'makeAddBtn', 'makeExampleBtn', 'makeClearBtn', 'makeUndoBtn', 'makeCount', 'makeErr',
-      'makeTip', 'makeSample', 'makePasteBox', 'makePasteBtn', 'makePasteAddBtn', 'makePasteErr',
+      'makeTip', 'makeSample', 'makeSampleWrap', 'makePasteBox', 'makePasteBtn', 'makePasteAddBtn', 'makePasteErr',
       'makePasteHint', 'makeSaveBtn', 'makeLoadInput',
       'edTitleIn', 'edEyebrow', 'paletteSel', 'fontSel',
       'toBoardWrap', 'toBoardBtn', 'blankBoardBtn']
@@ -580,8 +580,12 @@
     el.makeCard.hidden = false;
     /* 畫板現在只吃流程圖的形狀，其他幾種搬過去沒有意義 */
     el.toBoardWrap.hidden = gen.id !== 'flow';
-    el.makeSample.href = '#/' + gen.sample;
-    el.makeSample.textContent = '看一張排好的' + gen.name + '範本';
+    /* 有些種類（例如家系圖）在上游那 153 張範本裡沒有對應的，就不要留一個死連結 */
+    el.makeSampleWrap.hidden = !gen.sample;
+    if (gen.sample) {
+      el.makeSample.href = '#/' + gen.sample;
+      el.makeSample.textContent = '看一張排好的' + gen.name + '範本';
+    }
     show(el.makeTip, '');
     show(el.makePasteErr, '');
     el.makePasteBox.value = '';

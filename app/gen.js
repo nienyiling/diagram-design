@@ -963,6 +963,595 @@
     }
   };
 
+  /* ══ 八、家系圖 ═══════════════════════════════════════════════════
+     社工用的 genogram。符號照 McGoldrick 那一套通用慣例畫：
+
+       男□　女○　性別不明◇　案主雙框　已歿打叉
+       伴侶線橫的接兩個人，男左女右；婚姻狀態畫在線上（分居一撇、離婚兩撇）
+       子女從伴侶線中點垂下，長子在左；收養虛線、寄養點線
+       情感關係是「第二層」，另外用強調色畫（親近雙線、衝突鋸齒、斷絕兩撇…）
+
+     為什麼一張表就填得完：一列可以是「成員」「伴侶關係」或「情感關係」，
+     用型別欄分。成員那一列填「父親是誰、母親是誰」，手足與世代由程式算——
+     社工填的時候只要一個一個人往下加，不必自己想版面。 */
+
+  var GENO = {
+    size: 46, gapX: 46, coupleGap: 96, genH: 150, top: 74, left: 46, right: 954
+  };
+
+  var SEX_OPTIONS = [
+    { value: 'm', label: '男' },
+    { value: 'f', label: '女' },
+    { value: 'u', label: '不明' }
+  ];
+  var CHILD_OPTIONS = [
+    { value: 'bio', label: '親生' },
+    { value: 'adopt', label: '收養' },
+    { value: 'foster', label: '寄養' }
+  ];
+  var UNION_OPTIONS = [
+    { value: 'married', label: '結婚' },
+    { value: 'cohabit', label: '同居' },
+    { value: 'separated', label: '分居' },
+    { value: 'divorced', label: '離婚' },
+    { value: 'ended', label: '關係結束' }
+  ];
+  var BOND_OPTIONS = [
+    { value: 'close', label: '親近' },
+    { value: 'fused', label: '非常親近' },
+    { value: 'distant', label: '疏遠' },
+    { value: 'conflict', label: '衝突' },
+    { value: 'cutoff', label: '斷絕往來' },
+    { value: 'abuse', label: '暴力／虐待' }
+  ];
+  var GENO_KIND_OPTIONS = [
+    { value: 'person', label: '成員' },
+    { value: 'union', label: '伴侶關係' },
+    { value: 'bond', label: '情感關係' }
+  ];
+
+  function optLabel(opts, v) {
+    for (var i = 0; i < opts.length; i++) if (opts[i].value === v) return opts[i].label;
+    return opts[0].label;
+  }
+
+  var genogramGen = {
+    id: 'genogram',
+    name: '家系圖',
+    use: '社工用的家系圖（genogram）：三代成員、婚姻狀態、情感關係，符號照通用慣例。',
+    sampleTitle: '個案家庭關係圖',
+    rowName: '列',
+    help: [
+      '一列可以是「成員」「伴侶關係」或「情感關係」，用最左邊的型別欄分。',
+      '成員只要填「父親是誰、母親是誰」，世代與手足位置由程式算，不必自己排。',
+      '父母只能選前面已經填過的成員，所以由上而下（祖父母 → 父母 → 子女）填最順。',
+      '符號照慣例：男□、女○、性別不明◇、案主雙框、已歿打叉；伴侶男左女右。',
+      '情感關係是另外一層，用強調色畫在成員之間（親近雙線、衝突鋸齒、斷絕兩撇）。'
+    ],
+    fields: [
+      { key: 'kind', label: '型別', type: 'select', options: GENO_KIND_OPTIONS, width: '104px' },
+
+      { key: 'name', label: '姓名／稱謂', type: 'text', placeholder: '陳小華' },
+      { key: 'sex', label: '性別', type: 'select', options: SEX_OPTIONS, width: '88px', only: 'person' },
+      { key: 'age', label: '年齡', type: 'text', placeholder: '16', width: '84px', only: 'person' },
+      { key: 'father', label: '父親', type: 'rowref', width: '150px', only: 'person' },
+      { key: 'mother', label: '母親', type: 'rowref', width: '150px', only: 'person' },
+      { key: 'childType', label: '與父母', type: 'select', options: CHILD_OPTIONS, width: '104px', only: 'person' },
+      { key: 'note', label: '註記（可留空）', type: 'text', placeholder: '國中三年級', only: 'person' },
+      { key: 'index', label: '案主', type: 'check', width: '72px', only: 'person',
+        hint: '案主畫成雙框，一張圖標一個' },
+      { key: 'dead', label: '已歿', type: 'check', width: '72px', only: 'person',
+        hint: '已歿的成員符號上會打一個叉' },
+
+      { key: 'a', label: '這一位', type: 'rowref', width: '160px', only: 'union' },
+      { key: 'b', label: '與這一位', type: 'rowref', width: '160px', only: 'union' },
+      { key: 'union', label: '關係', type: 'select', options: UNION_OPTIONS, width: '116px', only: 'union' },
+      { key: 'year', label: '年份（可留空）', type: 'text', placeholder: '85', width: '128px', only: 'union' },
+
+      { key: 'ba', label: '這一位', type: 'rowref', width: '160px', only: 'bond' },
+      { key: 'bb', label: '與這一位', type: 'rowref', width: '160px', only: 'bond' },
+      { key: 'bond', label: '情感關係', type: 'select', options: BOND_OPTIONS, width: '134px', only: 'bond' }
+    ],
+    example: [
+      { kind: 'person', name: '陳大明', sex: 'm', age: '78', dead: true, note: '肝癌過世' },
+      { kind: 'person', name: '林秀英', sex: 'f', age: '75', note: '獨居' },
+      { kind: 'person', name: '陳志明', sex: 'm', age: '52', father: '陳大明', mother: '林秀英', note: '長期失業' },
+      { kind: 'person', name: '陳麗華', sex: 'f', age: '49', father: '陳大明', mother: '林秀英', note: '定居國外' },
+      { kind: 'person', name: '王淑芬', sex: 'f', age: '48', note: '早餐店打工' },
+      { kind: 'person', name: '陳小華', sex: 'f', age: '16', father: '陳志明', mother: '王淑芬', index: true, note: '國中三年級' },
+      { kind: 'person', name: '陳小強', sex: 'm', age: '12', father: '陳志明', mother: '王淑芬', note: '國小六年級' },
+      { kind: 'union', name: '', a: '陳大明', b: '林秀英', union: 'married', year: '55' },
+      { kind: 'union', name: '', a: '陳志明', b: '王淑芬', union: 'separated', year: '85' },
+      { kind: 'bond', name: '', ba: '陳志明', bb: '陳小華', bond: 'conflict' },
+      { kind: 'bond', name: '', ba: '王淑芬', bb: '陳小華', bond: 'close' },
+      { kind: 'bond', name: '', ba: '林秀英', bb: '陳小華', bond: 'fused' },
+      { kind: 'bond', name: '', ba: '陳大明', bb: '陳麗華', bond: 'cutoff' }
+    ],
+    build: function (rows, meta, opts) {
+      var warnings = [];
+      var people = [];
+      var byName = {};
+      var unions = [];
+      var bonds = [];
+      /* count 的語意是「有用到的列數」，一列可以是成員、伴侶關係或情感關係。
+         回人數的話，畫面上會說「目前 7 個列」但表單裡明明有 13 列。 */
+      var used = 0;
+
+      /* ── 一、讀進來 ───────────────────────────────────────────── */
+      (rows || []).forEach(function (row, i) {
+        var kind = row.kind || 'person';
+        var name = String(row.name || '').trim();
+
+        if (kind === 'person') {
+          if (!name) {
+            if (String(row.age || '').trim() || String(row.note || '').trim()) {
+              warnings.push('第 ' + (i + 1) + ' 列沒有填姓名，跳過了。');
+            }
+            return;
+          }
+          if (byName[name] != null) {
+            warnings.push('「' + name + '」出現了兩次。姓名要不一樣，' +
+              '不然「父親」「母親」分不出你指的是哪一個（同名可以寫成「陳志明（父）」）。');
+            return;
+          }
+          byName[name] = people.length;
+          used++;
+          people.push({
+            name: name, sex: (row.sex === 'f' || row.sex === 'u') ? row.sex : 'm',
+            age: String(row.age || '').trim(), note: String(row.note || '').trim(),
+            index: !!row.index, dead: !!row.dead,
+            childType: optValue(CHILD_OPTIONS, row.childType),
+            fatherName: String(row.father || '').trim(),
+            motherName: String(row.mother || '').trim(),
+            father: -1, mother: -1, gen: 0, x: 0, spouses: []
+          });
+          return;
+        }
+
+        if (kind === 'union') {
+          var ua = String(row.a || '').trim(), ub = String(row.b || '').trim();
+          if (!ua && !ub) return;
+          used++;
+          unions.push({ line: i + 1, aName: ua, bName: ub,
+            status: optValue(UNION_OPTIONS, row.union), year: String(row.year || '').trim() });
+          return;
+        }
+
+        var xa = String(row.ba || '').trim(), xb = String(row.bb || '').trim();
+        if (!xa && !xb) return;
+        used++;
+        bonds.push({ line: i + 1, aName: xa, bName: xb, type: optValue(BOND_OPTIONS, row.bond) });
+      });
+
+      if (!people.length) {
+        return { svg: emptyCanvas('在左邊填家庭成員（姓名、性別、父母是誰），這裡就會出現家系圖'),
+          warnings: warnings, count: 0 };
+      }
+
+      /* ── 二、把「誰的父母」接起來。父母一定要在自己前面，不然會繞成圈 ── */
+      people.forEach(function (p, i) {
+        ['father', 'mother'].forEach(function (key) {
+          var want = p[key + 'Name'];
+          if (!want) return;
+          var j = byName[want];
+          if (j == null || j >= i) {
+            warnings.push('「' + p.name + '」的' + (key === 'father' ? '父親' : '母親') +
+              '「' + want + '」不在它前面，先當成沒有填。由上而下（祖父母 → 父母 → 子女）填最順。');
+            return;
+          }
+          p[key] = j;
+        });
+        if (p.father >= 0 && p.father === p.mother) {
+          warnings.push('「' + p.name + '」的父親與母親填成同一個人，已忽略母親那一欄。');
+          p.mother = -1;
+        }
+      });
+
+      var indexN = people.filter(function (p) { return p.index; }).length;
+      if (indexN > 1) {
+        warnings.push('有 ' + indexN + ' 個人勾了「案主」。家系圖慣例是一張圖標一個案主。');
+      }
+
+      /* ── 三、伴侶關係 ─────────────────────────────────────────── */
+      unions.forEach(function (u) {
+        var ia = byName[u.aName], ib = byName[u.bName];
+        if (ia == null || ib == null || ia === ib) {
+          warnings.push('第 ' + u.line + ' 列的伴侶關係「' + (u.aName || '（空白）') + '」與「' +
+            (u.bName || '（空白）') + '」有一邊不是已填過的成員，這條線畫不出來。');
+          u.skip = true;
+          return;
+        }
+        u.a = ia; u.b = ib;
+        if (people[ia].spouses.indexOf(ib) < 0) people[ia].spouses.push(ib);
+        if (people[ib].spouses.indexOf(ia) < 0) people[ib].spouses.push(ia);
+      });
+
+      /* 有共同子女卻沒填伴侶關係：照樣要有一條線，不然子女會憑空垂下來 */
+      var pairSeen = {};
+      unions.forEach(function (u) { if (!u.skip) pairSeen[pairKey(u.a, u.b)] = true; });
+      people.forEach(function (p) {
+        if (p.father < 0 || p.mother < 0) return;
+        var k = pairKey(p.father, p.mother);
+        if (pairSeen[k]) return;
+        pairSeen[k] = true;
+        unions.push({ a: p.father, b: p.mother, status: 'implied', year: '' });
+        if (people[p.father].spouses.indexOf(p.mother) < 0) people[p.father].spouses.push(p.mother);
+        if (people[p.mother].spouses.indexOf(p.father) < 0) people[p.mother].spouses.push(p.father);
+      });
+
+      /* ── 四、世代 ─────────────────────────────────────────────
+         有父母的就是父母那一代 + 1；沒父母但有配偶的，跟著配偶走
+         （嫁進來、娶進來的那一位，家系圖上要跟配偶同一排）。 */
+      people.forEach(function (p) {
+        var g = 0;
+        if (p.father >= 0) g = Math.max(g, people[p.father].gen + 1);
+        if (p.mother >= 0) g = Math.max(g, people[p.mother].gen + 1);
+        p.gen = g;
+        p.rooted = p.father >= 0 || p.mother >= 0;
+      });
+      for (var pass = 0; pass < 4; pass++) {
+        people.forEach(function (p) {
+          if (p.rooted) return;
+          p.spouses.forEach(function (s) {
+            if (people[s].gen > p.gen) p.gen = people[s].gen;
+          });
+        });
+      }
+      var maxGen = people.reduce(function (m, p) { return Math.max(m, p.gen); }, 0);
+
+      /* ── 五、排位置 ───────────────────────────────────────────
+         一代一排。同一代裡照「父母排在哪裡」由左而右，配偶緊貼著放。
+         子女整組置中在父母中點下方，位置不夠就往右挪（不重疊優先）。 */
+      var placed = {};
+      var slot = GENO.size + GENO.gapX;
+      for (var g = 0; g <= maxGen; g++) {
+        var order = [];
+        people.forEach(function (p, i) { if (p.gen === g) order.push(i); });
+        if (g > 0) {
+          order.sort(function (i, j) {
+            var a = parentMid(people, i), b = parentMid(people, j);
+            if (a == null && b == null) return i - j;
+            if (a == null) return 1;
+            if (b == null) return -1;
+            return a - b || i - j;
+          });
+        }
+        var cursor = GENO.left;
+        order.forEach(function (i) {
+          if (placed[i]) return;
+          var unit = [i];
+          people[i].spouses.forEach(function (s) {
+            if (people[s].gen === g && !placed[s] && unit.indexOf(s) < 0) unit.push(s);
+          });
+          /* 慣例：男左女右。兩個人的時候才調，三個以上（再婚）維持填的順序 */
+          if (unit.length === 2 && people[unit[0]].sex === 'f' && people[unit[1]].sex === 'm') {
+            unit = [unit[1], unit[0]];
+          }
+          var width = unit.length * GENO.size + (unit.length - 1) * GENO.coupleGap;
+          var mid = null;
+          unit.forEach(function (k) { if (mid == null) mid = parentMid(people, k); });
+          var x0 = mid == null ? cursor : Math.max(cursor, mid - width / 2);
+          unit.forEach(function (k, n) {
+            people[k].x = x0 + n * (GENO.size + GENO.coupleGap);
+            placed[k] = true;
+          });
+          cursor = x0 + width + GENO.gapX;
+        });
+      }
+
+      /* 太寬就整張縮小，寧可小一點也不要畫到框外 */
+      var minX = Infinity, maxX = -Infinity;
+      people.forEach(function (p) {
+        if (p.x < minX) minX = p.x;
+        if (p.x + GENO.size > maxX) maxX = p.x + GENO.size;
+      });
+      var span = maxX - minX;
+      var avail = GENO.right - GENO.left;
+      var scale = Math.min(1, avail / Math.max(1, span));
+      if (scale < 0.999) {
+        warnings.push('成員有點多，整張圖縮小到 ' + Math.round(scale * 100) +
+          '% 才放得下。字會變小，必要時拆成兩張（例如父系一張、母系一張）。');
+      }
+      var offset = GENO.left + (avail - span * scale) / 2 - minX * scale;
+      var sz = GENO.size * scale;
+      people.forEach(function (p) {
+        p.px = p.x * scale + offset;
+        p.py = GENO.top + p.gen * GENO.genH;
+        p.cx = p.px + sz / 2;
+        p.cy = p.py + sz / 2;
+      });
+
+      /* ── 六、畫 ───────────────────────────────────────────────── */
+      var H = GENO.top + (maxGen + 1) * GENO.genH + 30;
+      var out = [canvasOpen(H, '家系圖')];
+
+      /* 伴侶線與子女線 */
+      var kids = {};
+      var unionTags = [];
+      people.forEach(function (p, i) {
+        if (p.father < 0 && p.mother < 0) return;
+        var k = pairKey(p.father, p.mother);
+        (kids[k] = kids[k] || []).push(i);
+      });
+
+      unions.forEach(function (u) {
+        if (u.skip) return;
+        var a = people[u.a], b = people[u.b];
+        var left = a.cx < b.cx ? a : b, right = a.cx < b.cx ? b : a;
+        var y = left.cy;
+        var x1 = left.px + sz, x2 = right.px;
+        if (x2 < x1) { x1 = right.px + sz; x2 = left.px; y = right.cy; }
+        var dash = (u.status === 'cohabit' || u.status === 'ended') ? ' stroke-dasharray="6 4"' : '';
+        out.push('<line x1="' + r1(x1) + '" y1="' + r1(y) + '" x2="' + r1(x2) + '" y2="' + r1(y) +
+          '" stroke="' + C.ink + '" stroke-width="1.3"' + dash + '/>');
+
+        var mx = (x1 + x2) / 2;
+        /* 分居一撇、離婚兩撇——這是家系圖上最要緊的一個資訊 */
+        var slashes = u.status === 'separated' ? 1 : (u.status === 'divorced' ? 2 : 0);
+        for (var n = 0; n < slashes; n++) {
+          var sx = mx + (n - (slashes - 1) / 2) * 9;
+          out.push('<line x1="' + r1(sx - 5) + '" y1="' + r1(y + 8) + '" x2="' + r1(sx + 5) +
+            '" y2="' + r1(y - 8) + '" stroke="' + C.ink + '" stroke-width="1.3"/>');
+        }
+        if (u.status !== 'implied') {
+          /* 標籤留到最後才畫：情感關係的弧線常常從這裡擦過去，先畫會被蓋掉 */
+          var tag = optLabel(UNION_OPTIONS, u.status) + (u.year ? ' ' + u.year : '');
+          unionTags.push(paperBox(mx, y - 12, tag, 8.5) +
+            text(mx, y - 12, tag, { fill: C.muted, size: 8.5, font: F.mono, anchor: 'middle' }));
+        }
+
+        /* 這一對的子女：從伴侶線中點垂下，再一條手足橫線 */
+        var mine = kids[pairKey(u.a, u.b)];
+        if (!mine || !mine.length) return;
+        drawChildren(out, people, mine, mx, y, sz);
+        delete kids[pairKey(u.a, u.b)];
+      });
+
+      /* 只有單親的子女：從那一個人底下垂下來 */
+      Object.keys(kids).forEach(function (k) {
+        var mine = kids[k];
+        var one = people[mine[0]].father >= 0 ? people[mine[0]].father : people[mine[0]].mother;
+        if (one < 0) return;
+        drawChildren(out, people, mine, people[one].cx, people[one].py + sz, sz);
+      });
+
+      /* 情感關係：第二層，用強調色，畫在成員之間 */
+      bonds.forEach(function (bd) {
+        var ia = byName[bd.aName], ib = byName[bd.bName];
+        if (ia == null || ib == null || ia === ib) {
+          warnings.push('第 ' + bd.line + ' 列的情感關係「' + (bd.aName || '（空白）') + '」與「' +
+            (bd.bName || '（空白）') + '」有一邊不是已填過的成員，這條線畫不出來。');
+          return;
+        }
+        out.push(bondPath(people[ia], people[ib], bd.type, sz));
+      });
+
+      /* 成員符號與伴侶標籤最後畫：它們都墊了紙色底，蓋在線上面才看得清楚 */
+      people.forEach(function (p) { out.push(personGlyph(p, sz, scale)); });
+      out = out.concat(unionTags);
+
+      out.push(genoLegend(H - 44, people, bonds));
+      out.push('</svg>');
+      return { svg: out.join(''), warnings: warnings, count: used };
+    }
+  };
+
+  /** 文字底下墊一塊紙色：線從旁邊經過時才不會把字劃掉。 */
+  function paperBox(cx, baseline, str, fs) {
+    var w = DD.textUnits(str) * fs + 7;
+    return '<rect x="' + r1(cx - w / 2) + '" y="' + r1(baseline - fs * 0.86) + '" width="' + r1(w) +
+      '" height="' + r1(fs * 1.24) + '" fill="' + C.paper + '"/>';
+  }
+
+  function optValue(opts, v) {
+    for (var i = 0; i < opts.length; i++) if (opts[i].value === v) return v;
+    return opts[0].value;
+  }
+
+  function pairKey(a, b) { return Math.min(a, b) + '|' + Math.max(a, b); }
+
+  function parentMid(people, i) {
+    var p = people[i];
+    var xs = [];
+    if (p.father >= 0) xs.push(people[p.father].x + GENO.size / 2);
+    if (p.mother >= 0) xs.push(people[p.mother].x + GENO.size / 2);
+    if (!xs.length) return null;
+    return xs.reduce(function (a, b) { return a + b; }, 0) / xs.length;
+  }
+
+  /** 子女：伴侶線中點垂下 → 手足橫線 → 各自垂下。長子在左（照填的順序）。 */
+  function drawChildren(out, people, idx, mx, my, sz) {
+    var sorted = idx.slice().sort(function (a, b) { return people[a].cx - people[b].cx; });
+    var barY = people[sorted[0]].py - 26;
+    out.push('<line x1="' + r1(mx) + '" y1="' + r1(my) + '" x2="' + r1(mx) + '" y2="' + r1(barY) +
+      '" stroke="' + C.ink + '" stroke-width="1.3"/>');
+    var x1 = people[sorted[0]].cx, x2 = people[sorted[sorted.length - 1]].cx;
+    if (sorted.length > 1) {
+      out.push('<line x1="' + r1(Math.min(x1, mx)) + '" y1="' + r1(barY) + '" x2="' + r1(Math.max(x2, mx)) +
+        '" y2="' + r1(barY) + '" stroke="' + C.ink + '" stroke-width="1.3"/>');
+    } else if (Math.abs(x1 - mx) > 1) {
+      out.push('<line x1="' + r1(mx) + '" y1="' + r1(barY) + '" x2="' + r1(x1) + '" y2="' + r1(barY) +
+        '" stroke="' + C.ink + '" stroke-width="1.3"/>');
+    }
+    sorted.forEach(function (i) {
+      var p = people[i];
+      var dash = p.childType === 'adopt' ? ' stroke-dasharray="6 4"'
+        : (p.childType === 'foster' ? ' stroke-dasharray="2 3"' : '');
+      out.push('<line x1="' + r1(p.cx) + '" y1="' + r1(barY) + '" x2="' + r1(p.cx) + '" y2="' + r1(p.py) +
+        '" stroke="' + C.ink + '" stroke-width="1.3"' + dash + '/>');
+    });
+  }
+
+  /** 一個成員：男□女○不明◇，案主雙框，已歿打叉，年齡在裡面、姓名在下面。 */
+  function personGlyph(p, sz, scale) {
+    var out = [];
+    var stroke = p.index ? C.accent : C.ink;
+    out.push(sexShape(p, p.px, p.py, sz, stroke, 1.4));
+    if (p.index) out.push(sexShape(p, p.px + 4, p.py + 4, sz - 8, stroke, 1.1));
+    if (p.dead) {
+      out.push('<line x1="' + r1(p.px + 3) + '" y1="' + r1(p.py + 3) + '" x2="' + r1(p.px + sz - 3) +
+        '" y2="' + r1(p.py + sz - 3) + '" stroke="' + C.ink + '" stroke-width="1.4"/>');
+      out.push('<line x1="' + r1(p.px + sz - 3) + '" y1="' + r1(p.py + 3) + '" x2="' + r1(p.px + 3) +
+        '" y2="' + r1(p.py + sz - 3) + '" stroke="' + C.ink + '" stroke-width="1.4"/>');
+    }
+    var fs = Math.max(8, 12 * scale);
+    if (p.age) {
+      out.push(text(p.cx, p.cy + fs * 0.36, p.age,
+        { fill: C.ink, size: fs, weight: '600', anchor: 'middle', font: F.mono }));
+    }
+    /* 姓名底下墊一塊紙色：情感關係線從旁邊經過時，才不會把名字劃掉 */
+    var nameFs = Math.max(9, 12.5 * scale);
+    out.push(paperBox(p.cx, p.py + sz + 15, p.name, nameFs));
+    out.push(text(p.cx, p.py + sz + 15, p.name,
+      { fill: C.ink, size: nameFs, weight: '600', anchor: 'middle' }));
+    if (p.note) {
+      var nfs = Math.max(7.5, 8.5 * scale);
+      DD.wrapLabel(p.note, 12).slice(0, 2).forEach(function (ln, i) {
+        out.push(paperBox(p.cx, p.py + sz + 29 + i * 11, ln, nfs));
+        out.push(text(p.cx, p.py + sz + 29 + i * 11, ln,
+          { fill: C.muted, size: nfs, anchor: 'middle', font: F.mono }));
+      });
+    }
+    return out.join('');
+  }
+
+  function sexShape(p, x, y, sz, stroke, w) {
+    if (p.sex === 'f') {
+      return '<circle cx="' + r1(x + sz / 2) + '" cy="' + r1(y + sz / 2) + '" r="' + r1(sz / 2) +
+        '" fill="#ffffff" stroke="' + stroke + '" stroke-width="' + w + '"/>';
+    }
+    if (p.sex === 'u') {
+      return '<polygon points="' + r1(x + sz / 2) + ',' + r1(y) + ' ' + r1(x + sz) + ',' + r1(y + sz / 2) +
+        ' ' + r1(x + sz / 2) + ',' + r1(y + sz) + ' ' + r1(x) + ',' + r1(y + sz / 2) +
+        '" fill="#ffffff" stroke="' + stroke + '" stroke-width="' + w + '"/>';
+    }
+    return '<rect x="' + r1(x) + '" y="' + r1(y) + '" width="' + r1(sz) + '" height="' + r1(sz) +
+      '" fill="#ffffff" stroke="' + stroke + '" stroke-width="' + w + '"/>';
+  }
+
+  /**
+   * 情感關係線。三件事：
+   *   1. 端點停在符號邊界外一點，不要壓在框上。
+   *   2. **走弧線不走直線**。直線會從別人的符號正中間穿過去，而且跟結構線
+   *      （伴侶線、子女線）長得太像；弧線一眼就看得出是「另一層」。
+   *   3. 親近／非常親近是沿著同一條弧的平行線，衝突是沿著弧的鋸齒——
+   *      所以統一先把弧取樣成一串點，再照型別加偏移。
+   */
+  function bondPath(a, b, type, sz) {
+    var dx = b.cx - a.cx, dy = b.cy - a.cy;
+    var len = Math.sqrt(dx * dx + dy * dy) || 1;
+    var ux = dx / len, uy = dy / len;
+    var pad = sz / 2 + 5;
+    var x1 = a.cx + ux * pad, y1 = a.cy + uy * pad;
+    var x2 = b.cx - ux * pad, y2 = b.cy - uy * pad;
+    /* 弧的鼓起量：跟長度成比例但有上限。太大會繞到天邊去，
+       圖例那種短線也會糊成一團 */
+    var bow = Math.min(30, len * 0.13);
+    var nx = -uy, ny = ux;
+    var cx = (x1 + x2) / 2 + nx * bow * 2, cy = (y1 + y2) / 2 + ny * bow * 2;
+    var col = C.accent;
+
+    /* 沿弧取樣，順便算出每一點的法線，平行線與鋸齒都靠它 */
+    function sample(n) {
+      var pts = [];
+      for (var i = 0; i <= n; i++) {
+        var t = i / n, m = 1 - t;
+        var px = m * m * x1 + 2 * m * t * cx + t * t * x2;
+        var py = m * m * y1 + 2 * m * t * cy + t * t * y2;
+        var tx = 2 * m * (cx - x1) + 2 * t * (x2 - cx);
+        var ty = 2 * m * (cy - y1) + 2 * t * (y2 - cy);
+        var tl = Math.sqrt(tx * tx + ty * ty) || 1;
+        pts.push({ x: px, y: py, nx: -ty / tl, ny: tx / tl });
+      }
+      return pts;
+    }
+
+    function poly(pts, offFn, dash, marker) {
+      var d = pts.map(function (p, i) {
+        var o = offFn ? offFn(i, pts.length) : 0;
+        return r1(p.x + p.nx * o) + ' ' + r1(p.y + p.ny * o);
+      }).join(' ');
+      return '<polyline points="' + d + '" fill="none" stroke="' + col + '" stroke-width="1.3"' +
+        (dash ? ' stroke-dasharray="' + dash + '"' : '') +
+        (marker ? ' marker-end="url(#ddg-arrow-accent)"' : '') + '/>';
+    }
+
+    /* 取樣點數也跟長度走：固定點數的話，短線的鋸齒會密到看不出是鋸齒。
+       取偶數，鋸齒的兩端才落在弧上（偏移 0） */
+    var steps = Math.max(6, Math.min(24, Math.round(len / 16)));
+    if (steps % 2) steps++;
+    var arc = sample(steps);
+    var out = [];
+    if (type === 'close') {
+      out.push(poly(arc, function () { return -2.4; }), poly(arc, function () { return 2.4; }));
+    } else if (type === 'fused') {
+      [-4, 0, 4].forEach(function (o) { out.push(poly(arc, function () { return o; })); });
+    } else if (type === 'distant') {
+      out.push(poly(arc, null, '6 5'));
+    } else if (type === 'cutoff') {
+      /* 斷絕：線中間兩道橫槓，像被剪斷 */
+      out.push(poly(arc));
+      var mid = Math.round(arc.length / 2);
+      [-1, 1].forEach(function (k) {
+        var q = arc[Math.max(0, Math.min(arc.length - 1, mid + k))];
+        out.push('<line x1="' + r1(q.x + q.nx * 6) + '" y1="' + r1(q.y + q.ny * 6) + '" x2="' +
+          r1(q.x - q.nx * 6) + '" y2="' + r1(q.y - q.ny * 6) + '" stroke="' + col + '" stroke-width="1.3"/>');
+      });
+    } else {
+      /* 衝突與暴力：沿著弧走鋸齒。暴力再加一個箭頭指向被施暴的一方 */
+      out.push(poly(arc, function (i, n) {
+        return (i === 0 || i === n - 1) ? 0 : ((i % 2) ? 5 : -5);
+      }, '', type === 'abuse'));
+    }
+    return out.join('');
+  }
+
+  function genoLegend(y, people, bonds) {
+    var items = [
+      { name: '男', mark: function (x, yy) {
+        return '<rect x="' + x + '" y="' + r1(yy - 6) + '" width="12" height="12" fill="#ffffff" stroke="' +
+          C.ink + '" stroke-width="1.2"/>'; } },
+      { name: '女', mark: function (x, yy) {
+        return '<circle cx="' + (x + 6) + '" cy="' + r1(yy) + '" r="6" fill="#ffffff" stroke="' +
+          C.ink + '" stroke-width="1.2"/>'; } }
+    ];
+    if (people.some(function (p) { return p.sex === 'u'; })) {
+      items.push({ name: '性別不明', mark: function (x, yy) {
+        return '<polygon points="' + (x + 6) + ',' + r1(yy - 6) + ' ' + (x + 12) + ',' + r1(yy) + ' ' +
+          (x + 6) + ',' + r1(yy + 6) + ' ' + x + ',' + r1(yy) + '" fill="#ffffff" stroke="' +
+          C.ink + '" stroke-width="1.2"/>'; } });
+    }
+    if (people.some(function (p) { return p.index; })) {
+      items.push({ name: '案主', mark: function (x, yy) {
+        return '<rect x="' + x + '" y="' + r1(yy - 6) + '" width="12" height="12" fill="#ffffff" stroke="' +
+          C.accent + '" stroke-width="1.2"/><rect x="' + (x + 2.5) + '" y="' + r1(yy - 3.5) +
+          '" width="7" height="7" fill="none" stroke="' + C.accent + '" stroke-width="1"/>'; } });
+    }
+    if (people.some(function (p) { return p.dead; })) {
+      items.push({ name: '已歿', mark: function (x, yy) {
+        return '<rect x="' + x + '" y="' + r1(yy - 6) + '" width="12" height="12" fill="#ffffff" stroke="' +
+          C.ink + '" stroke-width="1.2"/><line x1="' + x + '" y1="' + r1(yy - 6) + '" x2="' + (x + 12) +
+          '" y2="' + r1(yy + 6) + '" stroke="' + C.ink + '" stroke-width="1.2"/><line x1="' + (x + 12) +
+          '" y1="' + r1(yy - 6) + '" x2="' + x + '" y2="' + r1(yy + 6) + '" stroke="' + C.ink +
+          '" stroke-width="1.2"/>'; } });
+    }
+    var seen = {};
+    bonds.forEach(function (bd) {
+      if (seen[bd.type]) return;
+      seen[bd.type] = true;
+      items.push({ name: optLabel(BOND_OPTIONS, bd.type), mark: bondSwatch(bd.type) });
+    });
+    return legend(y, items);
+  }
+
+  function bondSwatch(type) {
+    return function (x, y) {
+      var a = { cx: x - 17, cy: y, px: x - 23, py: y - 6 };
+      var b = { cx: x + 41, cy: y, px: x + 35, py: y - 6 };
+      return bondPath(a, b, type, 12);
+    };
+  }
+
   /* ── 從 Excel 貼一整塊 ─────────────────────────────────────────────
      工作項目、起迄日、名單，本來就都躺在 Excel 裡。一行一列、一個 tab 一欄，
      照這一種圖的欄位順序對過去，比一格一格打快十倍。
@@ -1101,7 +1690,7 @@
 
   /* ── 對外 ───────────────────────────────────────────────────────── */
 
-  var TYPES = [flowGen, swimlaneGen, orgGen, ganttGen, timelineGen, layersGen, quadrantGen];
+  var TYPES = [flowGen, swimlaneGen, orgGen, genogramGen, ganttGen, timelineGen, layersGen, quadrantGen];
 
   function byId(id) {
     for (var i = 0; i < TYPES.length; i++) if (TYPES[i].id === id) return TYPES[i];

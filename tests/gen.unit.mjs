@@ -14,6 +14,7 @@ import { scoreboard } from './helpers.mjs';
 const require = createRequire(import.meta.url);
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const G = require(path.join(ROOT, 'app', 'gen.js'));
+const DD = require(path.join(ROOT, 'app', 'core.js'));
 
 const s = scoreboard('gen.unit');
 const t = (name, fn) => s.t(name, fn);
@@ -27,9 +28,9 @@ const buildExample = (gen) => gen.build(gen.example, defMeta(gen), {});
 /* ── 五種都要長得像同一種東西：規格是表單引擎照著長出畫面的依據 ────────── */
 
 await t('TYPES 是五種，id 不重複', () => {
-  assert.equal(G.TYPES.length, 7);
+  assert.equal(G.TYPES.length, 8);
   assert.deepEqual(G.TYPES.map((g) => g.id),
-    ['flow', 'swimlane', 'org', 'gantt', 'timeline', 'layers', 'quadrant']);
+    ['flow', 'swimlane', 'org', 'genogram', 'gantt', 'timeline', 'layers', 'quadrant']);
 });
 
 await t('每一種都有畫面要用的規格：名稱、用途、列名、欄位、範例、示意範本', () => {
@@ -38,7 +39,8 @@ await t('每一種都有畫面要用的規格：名稱、用途、列名、欄�
     assert.ok(Array.isArray(g.fields) && g.fields.length, g.id + ' 沒有欄位');
     assert.ok(Array.isArray(g.example) && g.example.length >= 3, g.id + ' 範例太短');
     assert.ok(Array.isArray(g.help) && g.help.length, g.id + ' 沒有說明');
-    assert.match(g.sample, /^example-/, g.id + ' 的示意範本 id 不對');
+    /* 示意範本是可選的：家系圖這種在上游那 153 張裡沒有對應的就不掛 */
+    if (g.sample) assert.match(g.sample, /^example-/, g.id + ' 的示意範本 id 不對');
     assert.ok(g.sampleTitle, g.id + ' 沒有預設標題');
     assert.equal(typeof g.build, 'function');
   });
@@ -610,6 +612,228 @@ await t('設定檔：讀回來的內容真的畫得出圖', () => {
   const out = back.gen.build(back.rows, back.meta, {});
   assert.equal(out.count, g.example.length);
   assert.deepEqual(out.warnings, []);
+});
+
+
+/* ── 家系圖 ────────────────────────────────────────────────────────
+   社工用的 genogram。符號慣例是這一種圖的全部價值——畫錯符號等於畫錯意思，
+   所以這一段測的是「慣例有沒有守住」，不是版面好不好看。 */
+
+const geno = G.byId('genogram');
+const genoSvg = (rows) => geno.build(rows, {}, {}).svg;
+const P = (name, extra) => Object.assign({ kind: 'person', name, sex: 'm' }, extra || {});
+/** 圖例本身也會畫一次符號與關係線，數東西時要先把它切掉，不然會多算一份。 */
+const genoBody = (svg) => svg.slice(0, svg.indexOf('>圖例<') >= 0 ? svg.lastIndexOf('<line', svg.indexOf('>圖例<')) : svg.length);
+
+await t('家系圖：男是方形、女是圓形、性別不明是菱形', () => {
+  assert.ok(/<rect[^>]*width="46"/.test(genoSvg([P('甲', { sex: 'm' })])), '男不是方形');
+  assert.ok(/<circle[^>]*r="23"/.test(genoSvg([P('乙', { sex: 'f' })])), '女不是圓形');
+  assert.ok(/<polygon/.test(genoSvg([P('丙', { sex: 'u' })])), '性別不明不是菱形');
+});
+
+await t('家系圖：案主畫成雙框（而且用強調色，一眼看得到）', () => {
+  const boxes = (rows) => (genoBody(genoSvg(rows))
+    .match(new RegExp('<rect[^>]*stroke="' + DD.UPSTREAM_LIGHT.accent + '"', 'g')) || []).length;
+  assert.equal(boxes([P('甲')]), 0, '沒標案主卻用了強調色');
+  assert.equal(boxes([P('甲', { index: true })]), 2, '案主沒有畫成雙框');
+});
+
+await t('家系圖：已歿在符號上打一個叉', () => {
+  const svg = genoBody(genoSvg([P('甲', { dead: true })]));
+  const box = /<rect x="([\d.]+)" y="([\d.]+)" width="46" height="46"/.exec(svg);
+  assert.ok(box, '找不到成員的符號');
+  const x = +box[1], y = +box[2];
+  const inside = (svg.match(/<line[^>]*>/g) || []).filter((l) => {
+    const m = /x1="([\d.]+)" y1="([\d.]+)" x2="([\d.]+)" y2="([\d.]+)"/.exec(l);
+    if (!m) return false;
+    return m.slice(1).every((v, i) => +v >= (i % 2 ? y : x) - 1 && +v <= (i % 2 ? y : x) + 47);
+  });
+  assert.equal(inside.length, 2, '已歿沒有在符號上打叉（要兩條交叉線）');
+});
+
+await t('家系圖：一張圖標兩個案主要講一聲（慣例是只標一個）', () => {
+  const out = geno.build([P('甲', { index: true }), P('乙', { index: true })], {}, {});
+  assert.equal(out.warnings.length, 1);
+  assert.match(out.warnings[0], /案主/);
+});
+
+await t('家系圖：世代由父母算出來，子女排在下一排', () => {
+  const rows = [
+    P('阿公'), P('阿嬤', { sex: 'f' }),
+    P('爸爸', { father: '阿公', mother: '阿嬤' }),
+    P('孫子', { father: '爸爸' })
+  ];
+  const svg = genoSvg(rows);
+  const y = (name) => {
+    const i = svg.indexOf('>' + name + '<');
+    const m = /<text x="[\d.]+" y="([\d.]+)"/g;
+    let last = null, r;
+    const before = svg.slice(0, i);
+    while ((r = m.exec(before))) last = r;
+    return +last[1];
+  };
+  assert.ok(y('爸爸') > y('阿公'), '子女沒有排在父母下一排');
+  assert.ok(y('孫子') > y('爸爸'), '第三代沒有排在第二代下面');
+});
+
+await t('家系圖：伴侶男左女右（慣例）', () => {
+  const svg = genoSvg([P('太太', { sex: 'f' }), P('先生', { sex: 'm' }),
+    { kind: 'union', a: '太太', b: '先生', union: 'married' }]);
+  const cx = (name) => {
+    const before = svg.slice(0, svg.indexOf('>' + name + '<'));
+    const m = /<text x="([\d.]+)"/g;
+    let last = null, r;
+    while ((r = m.exec(before))) last = r;
+    return +last[1];
+  };
+  assert.ok(cx('先生') < cx('太太'), '男沒有排在左邊');
+});
+
+await t('家系圖：分居畫一撇、離婚畫兩撇（這是最要緊的一個資訊）', () => {
+  const marks = (status) => {
+    const svg = genoSvg([P('甲'), P('乙', { sex: 'f' }),
+      { kind: 'union', a: '甲', b: '乙', union: status }]);
+    return (svg.match(/<line/g) || []).length;
+  };
+  const base = marks('married');
+  assert.equal(marks('separated') - base, 1, '分居不是一撇');
+  assert.equal(marks('divorced') - base, 2, '離婚不是兩撇');
+});
+
+await t('家系圖：同居畫虛線，結婚畫實線', () => {
+  const co = genoSvg([P('甲'), P('乙', { sex: 'f' }),
+    { kind: 'union', a: '甲', b: '乙', union: 'cohabit' }]);
+  const mar = genoSvg([P('甲'), P('乙', { sex: 'f' }),
+    { kind: 'union', a: '甲', b: '乙', union: 'married' }]);
+  assert.ok(co.includes('stroke-dasharray'), '同居不是虛線');
+  assert.ok(!mar.includes('stroke-dasharray'), '結婚不該是虛線');
+});
+
+await t('家系圖：婚姻狀態與年份標在線上', () => {
+  const svg = genoSvg([P('甲'), P('乙', { sex: 'f' }),
+    { kind: 'union', a: '甲', b: '乙', union: 'married', year: '85' }]);
+  assert.ok(words(svg).includes('結婚 85'), words(svg));
+});
+
+await t('家系圖：收養畫虛線、寄養畫點線、親生畫實線', () => {
+  const kid = (type) => genoSvg([P('爸'), P('媽', { sex: 'f' }),
+    P('孩', { father: '爸', mother: '媽', childType: type })]);
+  assert.ok(!kid('bio').includes('stroke-dasharray'), '親生不該是虛線');
+  assert.ok(/stroke-dasharray="6 4"/.test(kid('adopt')), '收養不是虛線');
+  assert.ok(/stroke-dasharray="2 3"/.test(kid('foster')), '寄養不是點線');
+});
+
+await t('家系圖：有共同子女但沒填伴侶關係時，照樣畫一條線（不然子女憑空垂下來）', () => {
+  const out = geno.build([P('爸'), P('媽', { sex: 'f' }), P('孩', { father: '爸', mother: '媽' })], {}, {});
+  assert.deepEqual(out.warnings, []);
+  /* 那條線是隱含的，不該標「結婚」兩個字 */
+  assert.ok(!words(out.svg).includes('結婚'), '隱含的伴侶線不該標成結婚');
+  assert.ok((out.svg.match(/<line/g) || []).length >= 3, '子女線畫得太少');
+});
+
+await t('家系圖：情感關係走弧線，跟結構線分得開', () => {
+  const svg = genoSvg([P('甲'), P('乙', { sex: 'f' }),
+    { kind: 'bond', ba: '甲', bb: '乙', bond: 'close' }]);
+  assert.ok(svg.includes('<polyline'), '情感關係不是弧線');
+  assert.ok(svg.includes(DD.UPSTREAM_LIGHT.accent), '情感關係沒有用強調色');
+});
+
+await t('家系圖：六種情感關係畫出來的樣子都不一樣', () => {
+  const seen = {};
+  ['close', 'fused', 'distant', 'conflict', 'cutoff', 'abuse'].forEach((type) => {
+    const svg = genoSvg([P('甲'), P('乙', { sex: 'f' }),
+      { kind: 'bond', ba: '甲', bb: '乙', bond: type }]);
+    const body = genoBody(svg);
+    const shape = body.slice(body.indexOf('<polyline'));
+    assert.ok(!seen[shape], type + ' 跟別的情感關係畫得一模一樣');
+    seen[shape] = type;
+  });
+  /* 親近兩條、非常親近三條（圖例那一份要先切掉，不然會多算） */
+  const count = (type) => (genoBody(genoSvg([P('甲'), P('乙', { sex: 'f' }),
+    { kind: 'bond', ba: '甲', bb: '乙', bond: type }])).match(/<polyline/g) || []).length;
+  assert.equal(count('close'), 2, '親近不是雙線');
+  assert.equal(count('fused'), 3, '非常親近不是三線');
+});
+
+await t('家系圖：父母指不到前面的人時講清楚，不會繞成圈', () => {
+  const out = geno.build([P('孩', { father: '還沒填的爸' }), P('還沒填的爸')], {}, {});
+  assert.equal(out.count, 2);
+  assert.equal(out.warnings.length, 1);
+  assert.match(out.warnings[0], /孩/);
+  assert.match(out.warnings[0], /不在它前面/);
+});
+
+await t('家系圖：父母填成同一個人時，忽略母親並講一聲', () => {
+  const out = geno.build([P('爸'), P('孩', { father: '爸', mother: '爸' })], {}, {});
+  assert.equal(out.warnings.length, 1);
+  assert.match(out.warnings[0], /同一個人/);
+});
+
+await t('家系圖：同名的成員要講一聲（不然父母欄分不出是哪一個）', () => {
+  const out = geno.build([P('陳志明'), P('陳志明')], {}, {});
+  assert.equal(out.count, 1);
+  assert.match(out.warnings[0], /兩次/);
+});
+
+await t('家系圖：伴侶或情感關係指到不存在的人時講清楚', () => {
+  const u = geno.build([P('甲'), { kind: 'union', a: '甲', b: '沒這個人', union: 'married' }], {}, {});
+  assert.equal(u.warnings.length, 1);
+  assert.match(u.warnings[0], /沒這個人/);
+  const b = geno.build([P('甲'), { kind: 'bond', ba: '甲', bb: '沒這個人', bond: 'close' }], {}, {});
+  assert.equal(b.warnings.length, 1);
+  assert.match(b.warnings[0], /沒這個人/);
+});
+
+await t('家系圖：嫁進來、娶進來的那一位跟配偶排同一排', () => {
+  const rows = [
+    P('阿公'), P('阿嬤', { sex: 'f' }),
+    P('兒子', { father: '阿公', mother: '阿嬤' }),
+    P('媳婦', { sex: 'f' }),
+    { kind: 'union', a: '兒子', b: '媳婦', union: 'married' }
+  ];
+  const svg = genoSvg(rows);
+  const y = (name) => {
+    const before = svg.slice(0, svg.indexOf('>' + name + '<'));
+    const m = /<text x="[\d.]+" y="([\d.]+)"/g;
+    let last = null, r;
+    while ((r = m.exec(before))) last = r;
+    return +last[1];
+  };
+  assert.equal(y('媳婦'), y('兒子'), '媳婦沒有跟兒子排同一排');
+  assert.ok(y('兒子') > y('阿公'), '第二代沒有排在第一代下面');
+});
+
+await t('家系圖：人多時整張縮小，不會畫到框外', () => {
+  const rows = [];
+  for (let i = 0; i < 14; i++) rows.push(P('成員' + i));
+  const out = geno.build(rows, {}, {});
+  assert.equal(out.count, 14);
+  assert.ok(out.warnings.some((w) => /縮小/.test(w)), out.warnings.join('／'));
+  const xs = [];
+  const m = /<(?:rect|circle)[^>]*?(?:x|cx)="([\d.]+)"/g;
+  let r;
+  while ((r = m.exec(out.svg))) xs.push(+r[1]);
+  assert.ok(Math.min.apply(null, xs) >= 0, '有符號畫到左邊界外');
+  assert.ok(Math.max.apply(null, xs) <= 1000, '有符號畫到右邊界外');
+});
+
+await t('家系圖：圖例只列這張圖真的用到的符號', () => {
+  const plain = words(genoSvg([P('甲'), P('乙', { sex: 'f' })]));
+  assert.ok(plain.includes('男') && plain.includes('女'));
+  assert.ok(!plain.includes('已歿'), '沒有人過世卻列了「已歿」');
+  assert.ok(!plain.includes('案主'), '沒有標案主卻列了「案主」');
+  const rich = words(genoSvg([P('甲', { index: true, dead: true }), P('乙', { sex: 'u' })]));
+  ['案主', '已歿', '性別不明'].forEach((w) => assert.ok(rich.includes(w), '圖例少了「' + w + '」'));
+});
+
+await t('家系圖：範例是一個看得懂的保護性個案（三代、有案主、有衝突與斷絕）', () => {
+  const out = geno.build(geno.example, {}, {});
+  assert.deepEqual(out.warnings, []);
+  const text = words(out.svg);
+  ['陳大明', '林秀英', '陳志明', '王淑芬', '陳小華', '陳小強', '陳麗華']
+    .forEach((n) => assert.ok(text.includes(n), '範例裡少了「' + n + '」'));
+  assert.ok(text.includes('分居 85'), '沒有標出分居');
+  assert.ok(text.includes('衝突') && text.includes('斷絕往來'), '圖例少了情感關係');
 });
 
 s.finish();

@@ -80,13 +80,13 @@ await t('首頁只有「你要做哪一種圖」，範本區預設收起來', as
   assert.equal(await page.locator('.source').isVisible(), true);
 });
 
-await t('首頁最上面就是七個「自己做一張」的入口，縮圖是產生器自己畫的', async () => {
+await t('首頁最上面就是八個「自己做一張」的入口，縮圖是產生器自己畫的', async () => {
   const makes = page.locator('.make');
-  assert.equal(await makes.count(), 7, '七種產生器');
+  assert.equal(await makes.count(), 8, '八種產生器');
   assert.equal(await makes.first().getAttribute('href'), '#/make/flow');
   assert.ok((await makes.first().innerText()).includes('流程圖'));
   /* 縮圖不是圖片檔也不是範本，是產生器當場畫出來的 SVG */
-  assert.equal(await page.locator('.make .shot svg').count(), 7);
+  assert.equal(await page.locator('.make .shot svg').count(), 8);
 });
 
 await t('範本的快捷入口還在，只是退到收合區裡', async () => {
@@ -957,6 +957,112 @@ await t('從產生器回首頁，表單卡就收起來', async () => {
   assert.equal(await page.locator('#projBox').isVisible(), true, '範本模式要看得到設定檔');
 });
 
+/* ── 家系圖：社工用的 genogram ─────────────────────────────────────── */
+
+await t('家系圖打得開，一列可以是成員／伴侶關係／情感關係', async () => {
+  await page.goto(server.url + '#/make/genogram', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  assert.ok((await page.locator('#makeTitle').innerText()).includes('家系圖'));
+  const kinds = await page.locator('#f_genogram_0_kind option').allInnerTexts();
+  assert.deepEqual(kinds, ['成員', '伴侶關係', '情感關係']);
+  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  ['陳大明', '陳小華', '分居 85'].forEach((w) =>
+    assert.ok(svgText.includes(w), '範例的圖上少了「' + w + '」：' + svgText.slice(0, 120)));
+});
+
+await t('家系圖：型別換成「伴侶關係」時，欄位跟著換一整組', async () => {
+  await page.locator('#makeExampleBtn').click();
+  await page.waitForTimeout(400);
+  /* 第 1 列是成員 */
+  assert.equal(await page.locator('#f_genogram_0_sex').count(), 1);
+  assert.equal(await page.locator('#f_genogram_0_union').count(), 0);
+  /* 第 8 列是伴侶關係 */
+  assert.equal(await page.locator('#f_genogram_7_kind').inputValue(), 'union');
+  assert.equal(await page.locator('#f_genogram_7_union').count(), 1);
+  assert.equal(await page.locator('#f_genogram_7_sex').count(), 0);
+  /* 第 10 列是情感關係 */
+  assert.equal(await page.locator('#f_genogram_9_kind').inputValue(), 'bond');
+  assert.equal(await page.locator('#f_genogram_9_bond').count(), 1);
+});
+
+await t('家系圖：「父親」的下拉只列前面已經填過的成員', async () => {
+  await page.locator('#makeExampleBtn').click();
+  await page.waitForTimeout(400);
+  const opts = await page.locator('#f_genogram_5_father option').allInnerTexts();
+  assert.ok(opts.includes('陳志明'), opts.join('／'));
+  assert.ok(!opts.includes('陳小強'), '後面才填的成員不該出現在父親欄：' + opts.join('／'));
+});
+
+await t('家系圖：改一個人的名字，圖上跟著改', async () => {
+  await page.locator('#f_genogram_5_name').fill('陳小美');
+  await page.waitForTimeout(500);
+  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(svgText.includes('陳小美'), svgText.slice(0, 150));
+});
+
+await t('家系圖：勾「已歿」圖上就打叉，勾「案主」就變雙框', async () => {
+  await page.locator('#makeExampleBtn').click();
+  await page.waitForTimeout(400);
+  const glyphs = () => page.evaluate(() => {
+    const svg = document.querySelector('#stage svg').outerHTML;
+    const body = svg.slice(0, svg.indexOf('>圖例<'));
+    return { lines: (body.match(/<line/g) || []).length,
+      accent: (body.match(/stroke="#eb6c36"/g) || []).length };
+  });
+  const before = await glyphs();
+  await page.locator('#f_genogram_1_dead').check();
+  await page.waitForTimeout(500);
+  const after = await glyphs();
+  assert.ok(after.lines >= before.lines + 2, '勾了已歿卻沒有打叉');
+  await page.locator('#f_genogram_1_dead').uncheck();
+  await page.locator('#f_genogram_1_index').check();
+  await page.waitForTimeout(500);
+  const idx = await glyphs();
+  assert.ok(idx.accent > before.accent, '勾了案主卻沒有用強調色畫雙框');
+  await page.locator('#f_genogram_1_index').uncheck();
+  await page.waitForTimeout(300);
+});
+
+await t('家系圖：父母指到後面的人時，錯誤訊息看得見而且說得出是誰', async () => {
+  await page.locator('#makeExampleBtn').click();
+  await page.waitForTimeout(400);
+  /* 把第 1 列（陳大明）的父親改成後面才出現的人 */
+  await page.evaluate(() => {
+    const st = window.DDForms._state();
+    st.rows[0].father = '陳小華';
+  });
+  await page.locator('#f_genogram_0_name').fill('陳大明 ');
+  await page.waitForTimeout(600);
+  assert.equal(await page.locator('#makeErr').isVisible(), true, '錯誤訊息沒有顯示出來');
+  const msg = await page.locator('#makeErr').innerText();
+  assert.ok(msg.includes('陳大明'), msg);
+  assert.ok(msg.includes('不在它前面'), msg);
+});
+
+await t('家系圖沒有現成範本，就不要留一個死連結', async () => {
+  await page.goto(server.url + '#/make/genogram', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  assert.equal(await page.locator('#makeSampleWrap').isVisible(), false);
+  await page.goto(server.url + '#/make/gantt', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  assert.equal(await page.locator('#makeSampleWrap').isVisible(), true, '甘特圖有範本，連結該在');
+});
+
+await t('家系圖也下載得出來，而且一樣帶著來源標註', async () => {
+  await page.goto(server.url + '#/make/genogram', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  await page.locator('#edTitleIn').fill('Case 2026');
+  await page.waitForTimeout(400);
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 15000 }),
+    page.locator('#dlSvg').click()
+  ]);
+  const text = fs.readFileSync(await download.path(), 'utf8');
+  assert.ok(text.includes('Case 2026'));
+  assert.ok(text.includes('陳小華'));
+  assert.ok(text.includes('cathrynlavery/diagram-design'));
+});
+
 /* ── 自由畫板：拖形狀、連線、改大小顏色 ─────────────────────────────── */
 
 /** SVG 是等比縮放的：x 與 y 都要用「寬度的比例」換算，用高度會整個歪掉。 */
@@ -1310,7 +1416,7 @@ await t('資料檔掛掉時，畫面上看得見一句講得出下一步的錯�
   assert.ok(msg.includes('file://'), '要講出「直接點開檔案不會動」這件事');
   assert.ok(msg.includes('照常可以用'), '要講清楚只有範本受影響');
   /* 做圖那七種完全不需要範本資料，資料掛了它們還是要能用 */
-  assert.equal(await p2.locator('.make').count(), 7, '資料掛了就連做圖入口都不見了');
+  assert.equal(await p2.locator('.make').count(), 8, '資料掛了就連做圖入口都不見了');
   await p2.close();
 });
 
