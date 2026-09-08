@@ -92,6 +92,19 @@
     };
   }
 
+  /* 箭頭：單向、雙向、不加。舊的設定檔沒有這一欄，一律當成單向——
+     那是這塊畫板一路以來的行為，改成「不加」會讓舊圖打開全部變成沒箭頭的線。 */
+  var ARROWS = [
+    { id: 'one', name: '單向 →' },
+    { id: 'both', name: '雙向 ↔' },
+    { id: 'none', name: '不加箭頭' }
+  ];
+
+  function arrowId(v) {
+    for (var i = 0; i < ARROWS.length; i++) if (ARROWS[i].id === v) return v;
+    return 'one';
+  }
+
   function normLink(raw, i, ids) {
     var l = raw || {};
     var from = String(l.from || ''), to = String(l.to || '');
@@ -100,7 +113,8 @@
       id: String(l.id || ('l' + i)),
       from: from, to: to,
       label: l.label == null ? '' : String(l.label),
-      dash: !!l.dash
+      dash: !!l.dash,
+      arrow: arrowId(l.arrow)
     };
   }
 
@@ -263,8 +277,11 @@
 
   function linkPath(pts, l) {
     var d = 'M ' + pts.map(function (p) { return r1(p.x) + ' ' + r1(p.y); }).join(' L ');
+    var a = arrowId(l.arrow);
     return '<path d="' + d + '" fill="none" stroke="' + C.muted + '" stroke-width="1.3"' +
-      (l.dash ? ' stroke-dasharray="5 4"' : '') + ' marker-end="url(#ddb-arrow)"/>';
+      (l.dash ? ' stroke-dasharray="5 4"' : '') +
+      (a === 'none' ? '' : ' marker-end="url(#ddb-arrow)"') +
+      (a === 'both' ? ' marker-start="url(#ddb-arrow-back)"' : '') + '/>';
   }
 
   function linkLabel(pt, textStr) {
@@ -297,6 +314,9 @@
       'stroke="rgba(45,49,66,0.10)" stroke-width="0.5"/></pattern>' +
       '<marker id="ddb-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">' +
       '<polygon points="0 0, 8 3, 0 6" fill="' + C.muted + '"/></marker>' +
+      /* 雙向的另一頭：refX 要放在 0 那一端，不然箭頭會凸出線的起點外面 */
+      '<marker id="ddb-arrow-back" markerWidth="8" markerHeight="6" refX="1" refY="3" orient="auto">' +
+      '<polygon points="8 0, 0 3, 8 6" fill="' + C.muted + '"/></marker>' +
       '</defs>');
     parts.push('<rect width="100%" height="100%" fill="' + C.paper + '"/>');
     parts.push('<rect width="100%" height="100%" fill="url(#ddb-' + (o.grid ? 'grid' : 'dots') +
@@ -486,7 +506,7 @@
   }
 
   return {
-    W: W, GRID: GRID, JOG: JOG, KINDS: KINDS, COLORS: COLORS,
+    W: W, GRID: GRID, JOG: JOG, KINDS: KINDS, COLORS: COLORS, ARROWS: ARROWS,
     kindById: kindById, colorById: colorById, snap: snap,
     normShape: normShape, normBoard: normBoard, boardHeight: boardHeight,
     anchor: anchor, routeLink: routeLink, linkMid: linkMid,

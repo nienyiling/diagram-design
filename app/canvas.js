@@ -296,6 +296,24 @@
       dash.title = l.dash ? '改成實線' : '改成虛線（退回、參照用）';
       dash.setAttribute('aria-label', dash.title);
       dash.addEventListener('click', function () { snapshot(); l.dash = !l.dash; persist(); paint(); });
+      /* 箭頭：單向、雙向、不加。三種都用得到——「互相協調」是雙向、
+         「同一層級」常常是不加箭頭的一條線。 */
+      var arrow = document.createElement('select');
+      arrow.className = 'bdlink-arrow';
+      arrow.setAttribute('aria-label', '這條線的箭頭');
+      B.ARROWS.forEach(function (a) {
+        var op = document.createElement('option');
+        op.value = a.id;
+        op.textContent = a.name;
+        arrow.appendChild(op);
+      });
+      arrow.value = l.arrow || 'one';
+      arrow.addEventListener('change', function () {
+        snapshot();
+        l.arrow = arrow.value;
+        persist();
+        paint();
+      });
       var del = document.createElement('button');
       del.type = 'button';
       del.className = 'ficon';
@@ -311,6 +329,7 @@
       });
       row.appendChild(lab);
       row.appendChild(inp);
+      row.appendChild(arrow);
       row.appendChild(dash);
       row.appendChild(del);
       el.bdLinks.appendChild(row);

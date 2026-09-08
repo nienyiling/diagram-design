@@ -77,6 +77,39 @@ await t('normBoard：指不到形狀的線會被丟掉（不然會留下飄在�
   assert.equal(b.links[0].to, 'b');
 });
 
+await t('連線的箭頭有三種：單向、雙向、不加', () => {
+  const b = boardOf([{ id: 'a', y: 40 }, { id: 'b', y: 300 }], [
+    { id: 'l1', from: 'a', to: 'b', arrow: 'one' },
+    { id: 'l2', from: 'a', to: 'b', arrow: 'both' },
+    { id: 'l3', from: 'a', to: 'b', arrow: 'none' }
+  ]);
+  assert.deepEqual(b.links.map((l) => l.arrow), ['one', 'both', 'none']);
+  const svg = (arrow) => B.renderBoard(boardOf([{ id: 'a', y: 40 }, { id: 'b', y: 300 }],
+    [{ from: 'a', to: 'b', arrow: arrow }]), {});
+  const one = svg('one'), both = svg('both'), none = svg('none');
+  assert.ok(/<path[^>]*marker-end/.test(one), '單向沒有箭頭');
+  assert.ok(!/<path[^>]*marker-start/.test(one), '單向不該有回頭的箭頭');
+  assert.ok(/<path[^>]*marker-start/.test(both), '雙向少了一頭');
+  assert.ok(/<path[^>]*marker-end/.test(both), '雙向少了另一頭');
+  assert.ok(!/<path[^>]*marker-(end|start)/.test(none), '說了不加箭頭還是加了');
+});
+
+await t('連線沒寫箭頭時當成單向（舊的設定檔打開不能整批變成沒箭頭）', () => {
+  const b = boardOf([{ id: 'a' }, { id: 'b', y: 300 }], [{ from: 'a', to: 'b' }]);
+  assert.equal(b.links[0].arrow, 'one');
+  assert.equal(boardOf([{ id: 'a' }, { id: 'b', y: 300 }],
+    [{ from: 'a', to: 'b', arrow: '亂打的' }]).links[0].arrow, 'one');
+});
+
+await t('存出載入之後箭頭還在（設定檔要記得住）', () => {
+  const b = boardOf([{ id: 'a' }, { id: 'b', y: 300 }],
+    [{ from: 'a', to: 'b', arrow: 'both', label: '互相', dash: true }]);
+  const back = B.parseBoardProject(B.buildBoardProject({ board: b }));
+  assert.equal(back.board.links[0].arrow, 'both');
+  assert.equal(back.board.links[0].label, '互相');
+  assert.equal(back.board.links[0].dash, true);
+});
+
 await t('normBoard：不是陣列也不會爆', () => {
   assert.deepEqual(B.normBoard(null).shapes, []);
   assert.deepEqual(B.normBoard({ shapes: '亂打的', links: 5 }).links, []);

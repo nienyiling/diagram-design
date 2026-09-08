@@ -1336,6 +1336,30 @@ await t('改文字、小字、形狀與顏色', async () => {
   assert.ok(svgText.includes('初審與分辦') && svgText.includes('承辦人 3 日內'), svgText.slice(0, 120));
 });
 
+await t('線的箭頭可以改成雙向或不加（不是每條關係都有方向）', async () => {
+  const L = await bdLinks(page);
+  assert.ok(L.length, '這時候應該已經有一條線了');
+  const pick = page.locator('.bdlink select').first();
+  assert.equal(await pick.inputValue(), 'one', '預設不是單向');
+  const markers = () => page.evaluate(() => {
+    const svg = document.querySelector('#bdStage svg').outerHTML;
+    return { end: (svg.match(/<path[^>]*marker-end/g) || []).length,
+      start: (svg.match(/<path[^>]*marker-start/g) || []).length };
+  });
+  const before = await markers();
+  await pick.selectOption('both');
+  await page.waitForTimeout(300);
+  const both = await markers();
+  assert.equal(both.start, before.start + 1, '改成雙向卻沒有多一頭箭頭');
+  await pick.selectOption('none');
+  await page.waitForTimeout(300);
+  const none = await markers();
+  assert.equal(none.end, before.end - 1, '說了不加箭頭還是有箭頭');
+  assert.equal(none.start, before.start, '不加箭頭卻留著回頭的那一頭');
+  await pick.selectOption('one');
+  await page.waitForTimeout(300);
+});
+
 await t('線上可以標字、改虛線、刪掉', async () => {
   const S = await bdShapes(page);
   await page.evaluate((id) => window.DDCanvas._select(id), S[0].id);

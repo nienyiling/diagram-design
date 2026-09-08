@@ -706,13 +706,9 @@
       var st = stateFor(cur);
       var out = cur.build(st.rows, st.meta, {});
       if (!out.count) { showTip('現在還沒有畫得出來的內容，先填幾列再搬。'); return; }
-      /* 關係圖搬過去會掉東西（畫板的線只有單向箭頭），要先講，不要讓人以為壞掉 */
-      var lose = cur.id === 'relation'
-        ? '\n畫板的線只有單向箭頭：雙向會變單向，「不加箭頭」也會長出箭頭。\n'
-        : '';
       var ok = window.confirm('要把這張圖搬到畫板嗎？\n\n' +
         '搬過去之後每一格都拖得動、可以改形狀和顏色，\n' +
-        '但**不能再搬回填表畫面**（畫板記的是座標，表單記的是順序）。\n' + lose + '\n' +
+        '但**不能再搬回填表畫面**（畫板記的是座標，表單記的是順序）。\n\n' +
         '填表這邊的內容會留著，隨時可以回來重新產生一次。');
       if (!ok) return;
       if (cur.id === 'relation') {

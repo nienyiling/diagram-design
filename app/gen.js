@@ -2048,8 +2048,7 @@
    * 回的是純資料（形狀與連線的清單），board.js 的 normBoard() 再驗一次。
    * gen.js 不相依 board.js，board.js 也不相依 gen.js，兩邊只共用這份欄位約定。
    *
-   * 畫板沒有的東西會掉：雙向箭頭只剩單向、「不加箭頭」也會長出箭頭。
-   * 呼叫端要跟使用者講清楚，不要讓人以為是壞掉。
+   * 單向／雙向／不加箭頭三種都帶得過去（畫板的線本來只有單向，為此加了 arrow 欄）。
    */
   function relationBoard(rows, meta) {
     var lay = relLayout(rows, meta);
@@ -2071,7 +2070,7 @@
       var ia = lay.byText[l.aName], ib = lay.byText[l.bName];
       if (ia == null || ib == null || ia === ib) return;
       links.push({ id: 'rl' + i, from: ids[ia], to: ids[ib], label: l.label,
-        dash: l.style === 'dashed' });
+        dash: l.style === 'dashed', arrow: l.arrow });
     });
     return { shapes: shapes, links: links };
   }

@@ -186,10 +186,14 @@
     /* 拖方塊時不要順便選到文字：整頁反白很醜，而且會把拖曳吃掉 */
     user-select:none; -webkit-user-select:none;}
   .bdstage svg{width:100%; height:auto; display:block; cursor:default;}
-  .bdlink{display:flex; gap:8px; align-items:center; padding:8px 0; border-top:1px solid var(--line-soft);}
+  /* 一列上有：對方是誰、線上的字、箭頭、實虛、刪掉。窄一點就換行，
+     不換行的話後面兩顆按鈕會被擠出面板外，點不到。 */
+  .bdlink{display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:8px 0;
+    border-top:1px solid var(--line-soft);}
   .bdlink-name{flex:0 0 34%; font-size:12.5px; color:var(--ink-soft); overflow:hidden;
     text-overflow:ellipsis; white-space:nowrap;}
-  .bdlink input{flex:1 1 auto; min-height:40px;}
+  .bdlink input{flex:1 1 120px; min-height:40px; min-width:0;}
+  .bdlink-arrow{flex:0 1 auto; min-height:40px; min-width:0;}
   input[type=range]{width:100%; accent-color:var(--seal); min-height:36px;}
 
   /* 預覽要跟在旁邊：改一格馬上看到，是這個工具唯一的賣點。
