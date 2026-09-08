@@ -265,6 +265,18 @@
     /* 舊網址 #/flow 是流程圖產生器，還在外面流傳，轉到新的位置 */
     if (id === 'flow') { location.replace('#/make/flow'); return; }
 
+    if (id === 'board') {
+      if (!gallery.hidden) lastScroll = window.scrollY;
+      gallery.hidden = true;
+      editor.hidden = false;
+      window.scrollTo(0, 0);
+      document.title = '畫板 — 公務用圖表工具';
+      window.DDForms.close();
+      window.DDCanvas.open();
+      return;
+    }
+    window.DDCanvas.close();
+
     var make = /^make\/(.+)$/.exec(id);
     if (make && GEN.byId(make[1])) {
       if (!gallery.hidden) lastScroll = window.scrollY;
@@ -312,6 +324,7 @@
     });
     window.DDEditor.bind();
     window.DDForms.init();
+    window.DDCanvas.init();
     window.addEventListener('hashchange', route);
   }
 

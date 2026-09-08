@@ -20,7 +20,8 @@ const FILES = ['index.html', '_headers'];
 const DIRS = ['app', 'data'];
 const REQUIRED = [
   'index.html', '_headers',
-  'app/core.js', 'app/gen.js', 'app/app.js', 'app/editor.js', 'app/forms.js',
+  'app/core.js', 'app/gen.js', 'app/board.js',
+  'app/app.js', 'app/editor.js', 'app/forms.js', 'app/canvas.js',
   'data/diagrams.json'
 ];
 

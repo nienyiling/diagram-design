@@ -164,6 +164,27 @@
     .mrow .ffields{display:grid; grid-template-columns:1fr; gap:10px;}
   }
 
+  /* 畫板 */
+  .bdtools{display:flex; gap:8px; flex-wrap:wrap; margin:14px 0 4px;}
+  button.bdtool{display:flex; align-items:center; gap:8px; padding:10px 14px; min-height:46px; font-size:14px;}
+  .bdtool-i{width:20px; height:14px; flex:none; border:1.4px solid var(--ink-soft); background:#fff;}
+  .bdtool-i.k-step{border-radius:3px;}
+  .bdtool-i.k-start{border-radius:7px;}
+  .bdtool-i.k-decision{transform:rotate(45deg) scale(.72); border-radius:2px;}
+  .bdtool-i.k-note{border-style:dashed; border-radius:2px;}
+  .bdtool-i.k-label{border:0; border-bottom:1.4px solid var(--ink-soft); height:8px;}
+  button#bdLinkBtn.on{background:var(--seal); border-color:var(--seal); color:#fff; font-weight:700;}
+  .bdstage{background:var(--surface); border:1px solid var(--line); border-radius:8px;
+    margin-top:12px; overflow:auto; touch-action:pan-y;
+    /* 拖方塊時不要順便選到文字：整頁反白很醜，而且會把拖曳吃掉 */
+    user-select:none; -webkit-user-select:none;}
+  .bdstage svg{width:100%; height:auto; display:block; cursor:default;}
+  .bdlink{display:flex; gap:8px; align-items:center; padding:8px 0; border-top:1px solid var(--line-soft);}
+  .bdlink-name{flex:0 0 34%; font-size:12.5px; color:var(--ink-soft); overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap;}
+  .bdlink input{flex:1 1 auto; min-height:40px;}
+  input[type=range]{width:100%; accent-color:var(--seal); min-height:36px;}
+
   /* 預覽要跟在旁邊：改一格馬上看到，是這個工具唯一的賣點。
      捲出畫面外就等於沒有，所以寬螢幕黏在右欄、窄螢幕黏在上緣。 */
   @media(min-width:1180px){
@@ -291,6 +312,11 @@
         下面的縮圖是<strong>照範例內容真的畫出來的</strong>——填完你的內容，
         得到的就是同一種樣子。</p>
       <div class="makes" id="makes"></div>
+      <p class="hint" style="margin-top:16px"><strong>形狀對不上、想自己擺？</strong>
+        <a href="#/board">開一塊空白畫板 →</a>
+        自己拖形狀、自己連線、自己改大小顏色。
+        （建議先用上面的填表產生，排好之後再搬到畫板微調——從空白開始畫流程圖，
+        跟在 Word 裡拉方塊一樣痛苦。）</p>
     </div>
 
     <!-- 範本資料載不進來時的訊息。刻意放在收合區「外面」——
@@ -404,6 +430,71 @@
         也可以傳給同事接手。填的內容本來就會留在這台電腦的瀏覽器裡，關掉分頁再開還在。</p>
       <p class="hint"><a href="#/" id="makeSample">看一張排好的範本</a>
         ——想知道「這種圖長什麼樣子」的時候看，不必照它填。</p>
+      <p class="hint" id="toBoardWrap" hidden>形狀不夠用、有一格想擺到別的地方？
+        <button type="button" id="toBoardBtn">把這張圖搬到畫板繼續改 →</button>
+        搬過去之後每一格都拖得動，但<strong>不能再搬回填表畫面</strong>。</p>
+    </div>
+
+    <!-- ══════════ 自由畫板 ══════════ -->
+    <div class="card" id="bdCard" hidden>
+      <h2>畫板</h2>
+      <p class="hint">從下面挑一個形狀加進來，拖它到想要的位置。拖角落的小方塊改大小，
+        點「連線」再點兩個形狀就把它們接起來。<strong>線會黏在形狀上</strong>，
+        之後拖動方塊時線會跟著跑。</p>
+      <div class="bdtools" id="bdTools"></div>
+      <div class="row">
+        <button type="button" id="bdLinkBtn" aria-pressed="false">連線</button>
+        <button type="button" id="bdUndoBtn" disabled>↶ 復原</button>
+        <button type="button" id="bdClearBtn">全部清空</button>
+      </div>
+      <p class="hint" id="bdCount" role="status" aria-live="polite"></p>
+      <p class="okbox" id="bdTip" role="status" aria-live="polite"></p>
+      <p class="errbox" id="bdErr" role="alert"></p>
+
+      <div class="bdstage" id="bdStage" role="application" aria-label="畫板"></div>
+      <p class="hint">選取一個形狀之後，可以用方向鍵推一格（按住 Shift 推五格）、
+        Delete 刪掉、Esc 取消選取。</p>
+
+      <p class="hint" id="bdNoSel">點畫板上的任何一個形狀，這裡就會出現它的設定。</p>
+      <div id="bdPanel" hidden>
+        <div class="grid c2">
+          <div>
+            <label class="fl" for="bdText">文字</label>
+            <input type="text" id="bdText" placeholder="登記收文">
+          </div>
+          <div>
+            <label class="fl" for="bdSub">小字副標（可留空）</label>
+            <input type="text" id="bdSub" placeholder="收發室">
+          </div>
+          <div>
+            <label class="fl" for="bdKind">形狀</label>
+            <select id="bdKind"></select>
+          </div>
+          <div>
+            <label class="fl" for="bdColor">顏色</label>
+            <select id="bdColor"></select>
+          </div>
+          <div>
+            <label class="fl" for="bdSize">字級 <span id="bdSizeOut"></span></label>
+            <input type="range" id="bdSize" min="9" max="28" step="1">
+          </div>
+          <div style="display:flex; align-items:flex-end">
+            <button type="button" id="bdDelBtn">刪掉這個形狀</button>
+          </div>
+        </div>
+        <div id="bdLinksWrap" hidden>
+          <p class="fl" style="margin-top:16px">這個形狀身上的線</p>
+          <div id="bdLinks"></div>
+        </div>
+      </div>
+
+      <div class="row">
+        <button type="button" id="bdSaveBtn">存出設定檔</button>
+        <label class="filebtn" for="bdLoadInput">載入設定檔
+          <input type="file" id="bdLoadInput" accept=".json,application/json"></label>
+      </div>
+      <p class="hint">畫的東西會留在這台電腦的瀏覽器裡，關掉分頁再開還在。
+        「存出設定檔」可以帶著走，也可以傳給同事接手。</p>
     </div>
 
     <div class="card">
@@ -518,7 +609,9 @@
 <script src="app/core.js"></script>
 <script src="app/editor.js"></script>
 <script src="app/gen.js"></script>
+<script src="app/board.js"></script>
 <script src="app/forms.js"></script>
+<script src="app/canvas.js"></script>
 <script src="app/app.js"></script>
 </body>
 </html>

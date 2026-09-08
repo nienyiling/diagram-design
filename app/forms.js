@@ -473,7 +473,7 @@
       'makeAddBtn', 'makeExampleBtn', 'makeClearBtn', 'makeUndoBtn', 'makeCount', 'makeErr',
       'makeTip', 'makeSample', 'makePasteBox', 'makePasteBtn', 'makePasteAddBtn', 'makePasteErr',
       'makePasteHint', 'makeSaveBtn', 'makeLoadInput',
-      'edTitleIn', 'edEyebrow', 'paletteSel', 'fontSel']
+      'edTitleIn', 'edEyebrow', 'paletteSel', 'fontSel', 'toBoardWrap', 'toBoardBtn']
       .forEach(function (id) { el[id] = $(id); });
 
     restore();
@@ -510,6 +510,20 @@
       buildForm();
       showTip('已復原。');
     });
+    /* 搬到畫板是**單向門**：表單描述的是「一串有順序的列」，畫板是「一堆有座標的框」，
+       回不去。所以要先問一聲，不能按了就走。 */
+    el.toBoardBtn.addEventListener('click', function () {
+      var st = stateFor(cur);
+      var out = cur.build(st.rows, st.meta, {});
+      if (!out.count) { showTip('現在還沒有畫得出來的內容，先填幾列再搬。'); return; }
+      var ok = window.confirm('要把這張圖搬到畫板嗎？\n\n' +
+        '搬過去之後每一格都拖得動、可以改形狀和顏色，\n' +
+        '但**不能再搬回填表畫面**（畫板記的是座標，表單記的是順序）。\n\n' +
+        '填表這邊的內容會留著，隨時可以回來重新產生一次。');
+      if (!ok) return;
+      window.DDCanvas.seed(flowNodes(st.rows));
+      location.hash = '#/board';
+    });
     el.makePasteBtn.addEventListener('click', function () { applyPaste(true); });
     el.makePasteAddBtn.addEventListener('click', function () { applyPaste(false); });
     el.makeSaveBtn.addEventListener('click', saveProject);
@@ -520,11 +534,50 @@
     });
   }
 
+  /**
+   * 把流程圖的列轉成 board.js 要的節點。跟 gen.js 的 build() 是同一套規則——
+   * 那邊算的是版面，這邊要的是節點本身，所以借 gen.js 算好的版面反推太繞，
+   * 直接照同一份規則整一次。改了 gen.js 的流程圖欄位，這裡要跟著改。
+   */
+  function flowNodes(rows) {
+    var nodes = [];
+    var lastKind = null;
+    (rows || []).forEach(function (row) {
+      var main = String(row.main || '').trim();
+      if (!main) return;
+      var kind = row.kind || 'step';
+      if (kind === 'branch' && lastKind !== 'decision' && lastKind !== 'branch') kind = 'step';
+      var n = {
+        kind: kind, main: main, sub: String(row.sub || '').trim(),
+        branch: null, loop: null, downLabel: '', branchEnds: false
+      };
+      if (kind === 'decision') {
+        n.branch = { label: String(row.branchLabel || '').trim() || '否' };
+        n.downLabel = String(row.downLabel || '').trim();
+        n.branchEnds = !!row.branchEnds;
+        var lt = String(row.loopTo || '').trim();
+        if (lt) n.loop = { label: String(row.loopLabel || '').trim() || '是', target: lt };
+      }
+      nodes.push(n);
+      lastKind = kind;
+    });
+    nodes.forEach(function (n, idx) {
+      if (!n.loop) return;
+      var found = -1;
+      for (var j = 0; j < idx; j++) if (nodes[j].main === n.loop.target) { found = j; break; }
+      if (found < 0) n.loop = null;
+      else n.loop.index = found;
+    });
+    return nodes;
+  }
+
   function open(typeId) {
     var gen = GEN.byId(typeId);
     if (!gen) return false;
     cur = gen;
     el.makeCard.hidden = false;
+    /* 畫板現在只吃流程圖的形狀，其他幾種搬過去沒有意義 */
+    el.toBoardWrap.hidden = gen.id !== 'flow';
     el.makeSample.href = '#/' + gen.sample;
     el.makeSample.textContent = '看一張排好的' + gen.name + '範本';
     show(el.makeTip, '');

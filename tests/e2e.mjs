@@ -957,6 +957,286 @@ await t('從產生器回首頁，表單卡就收起來', async () => {
   assert.equal(await page.locator('#projBox').isVisible(), true, '範本模式要看得到設定檔');
 });
 
+/* ── 自由畫板：拖形狀、連線、改大小顏色 ─────────────────────────────── */
+
+/** SVG 是等比縮放的：x 與 y 都要用「寬度的比例」換算，用高度會整個歪掉。 */
+async function boardXY(p, x, y) {
+  return p.evaluate(([x, y]) => {
+    const r = document.querySelector('#bdStage svg').getBoundingClientRect();
+    const k = r.width / 1000;
+    return { x: r.left + x * k, y: r.top + y * k };
+  }, [x, y]);
+}
+const bdShapes = (p) => p.evaluate(() => window.DDCanvas._board().shapes);
+const bdLinks = (p) => p.evaluate(() => window.DDCanvas._board().links);
+async function bdDrag(p, fx, fy, tx, ty) {
+  const a = await boardXY(p, fx, fy), b = await boardXY(p, tx, ty);
+  await p.mouse.move(a.x, a.y);
+  await p.mouse.down();
+  await p.mouse.move(b.x, b.y, { steps: 12 });
+  await p.mouse.up();
+  await p.waitForTimeout(250);
+}
+async function bdClick(p, x, y) {
+  const c = await boardXY(p, x, y);
+  await p.mouse.click(c.x, c.y);
+  await p.waitForTimeout(220);
+}
+const bdMid = (s) => [s.x + s.w / 2, s.y + s.h / 2];
+const bdTool = (p, name) => p.locator('#bdTools button', { hasText: name });
+
+await t('畫板打得開，工具列是照 board.js 的規格長出來的', async () => {
+  await page.goto(server.url + '#/board', { waitUntil: 'networkidle' });
+  await page.locator('#bdStage svg').waitFor({ timeout: 5000 });
+  assert.equal(await page.locator('#bdCard').isVisible(), true);
+  const names = await page.evaluate(() => window.DDBoard.KINDS.map((k) => k.name));
+  assert.equal(await page.locator('#bdTools button').count(), names.length);
+  const shown = await page.locator('#bdTools button').allInnerTexts();
+  names.forEach((n) => assert.ok(shown.some((s) => s.includes(n)), '工具列少了「' + n + '」'));
+  /* 空畫板要講得出下一步 */
+  const svgText = await page.evaluate(() => document.querySelector('#bdStage svg').textContent);
+  assert.ok(svgText.includes('挑一個形狀'), svgText.slice(0, 80));
+});
+
+await t('加形狀：連按會往下排，不會疊在一起（疊著就會拖到別的）', async () => {
+  for (const [kind, text] of [['起訖', '收件'], ['步驟', '初審'], ['判斷', '資料齊全？']]) {
+    await bdTool(page, kind).click();
+    await page.locator('#bdText').fill(text);
+    await page.waitForTimeout(200);
+  }
+  const S = await bdShapes(page);
+  assert.equal(S.length, 3);
+  assert.deepEqual(S.map((s) => s.text), ['收件', '初審', '資料齊全？']);
+  assert.deepEqual(S.map((s) => s.kind), ['start', 'step', 'decision']);
+  for (let i = 1; i < S.length; i++) {
+    assert.ok(S[i].y >= S[i - 1].y + S[i - 1].h, '第 ' + (i + 1) + ' 個疊到前一個上面了');
+  }
+});
+
+await t('拖一個形狀，它就到新的位置（而且對到格線）', async () => {
+  const S = await bdShapes(page);
+  const target = S[2];
+  await bdDrag(page, ...bdMid(target), 760, 300);
+  const after = (await bdShapes(page))[2];
+  assert.notEqual(after.x, target.x, '拖了沒動');
+  assert.equal(after.x % 10, 0, '沒有對到格線：' + after.x);
+  assert.equal(after.y % 10, 0, '沒有對到格線：' + after.y);
+});
+
+await t('連線：點「連線」再點兩個形狀就接起來', async () => {
+  const S = await bdShapes(page);
+  await page.locator('#bdLinkBtn').click();
+  assert.equal(await page.locator('#bdLinkBtn').getAttribute('aria-pressed'), 'true');
+  await bdClick(page, ...bdMid(S[0]));
+  assert.ok((await page.locator('#bdTip').innerText()).includes('要連到'), '沒有提示下一步');
+  await bdClick(page, ...bdMid(S[1]));
+  const L = await bdLinks(page);
+  assert.equal(L.length, 1);
+  assert.equal(L[0].from, S[0].id);
+  assert.equal(L[0].to, S[1].id);
+  assert.equal(await page.locator('#bdLinkBtn').getAttribute('aria-pressed'), 'false', '連完要退出連線模式');
+});
+
+await t('**拖動形狀時，線跟著跑**（這是畫板存在的前提）', async () => {
+  const S = await bdShapes(page);
+  const linkEnd = () => page.evaluate(() => {
+    const d = document.querySelector('#bdStage svg path[marker-end]').getAttribute('d');
+    return d.split(' L ').pop();
+  });
+  const before = await linkEnd();
+  await bdDrag(page, ...bdMid(S[1]), 200, 480);
+  const after = await linkEnd();
+  assert.notEqual(before, after, '方塊移動了，線卻停在原地');
+  /* 線的終點要落在移動後那個方塊上 */
+  const moved = (await bdShapes(page))[1];
+  const [ex, ey] = after.split(' ').map(Number);
+  assert.ok(ex >= moved.x - 2 && ex <= moved.x + moved.w + 2, '線沒接到移動後的方塊：' + after);
+  assert.ok(ey >= moved.y - 2 && ey <= moved.y + moved.h + 2, '線沒接到移動後的方塊：' + after);
+});
+
+await t('拉角落的把手可以改大小，而且拉不成一條線', async () => {
+  const S = await bdShapes(page);
+  await page.evaluate((id) => window.DDCanvas._select(id), S[0].id);
+  await page.waitForTimeout(200);
+  assert.equal(await page.locator('#bdStage svg [data-handle]').count(), 8, '沒有八個把手');
+  const s0 = S[0];
+  await bdDrag(page, s0.x + s0.w, s0.y + s0.h, s0.x + s0.w + 80, s0.y + s0.h + 40);
+  const after = (await bdShapes(page))[0];
+  assert.ok(after.w > s0.w && after.h > s0.h, '拉了沒變大：' + after.w + 'x' + after.h);
+  /* 往回拉到底也不能變成一條線 */
+  await bdDrag(page, after.x + after.w, after.y + after.h, after.x, after.y);
+  const tiny = (await bdShapes(page))[0];
+  assert.ok(tiny.w >= 60 && tiny.h >= 28, '被拉成一條線了：' + tiny.w + 'x' + tiny.h);
+});
+
+await t('改文字、小字、形狀與顏色', async () => {
+  const S = await bdShapes(page);
+  await page.evaluate((id) => window.DDCanvas._select(id), S[1].id);
+  await page.waitForTimeout(200);
+  await page.locator('#bdText').fill('初審與分辦');
+  await page.locator('#bdSub').fill('承辦人 3 日內');
+  await page.locator('#bdColor').selectOption('accent');
+  await page.locator('#bdKind').selectOption('note');
+  await page.waitForTimeout(300);
+  const after = (await bdShapes(page))[1];
+  assert.equal(after.text, '初審與分辦');
+  assert.equal(after.sub, '承辦人 3 日內');
+  assert.equal(after.color, 'accent');
+  assert.equal(after.kind, 'note');
+  const svgText = await page.evaluate(() => document.querySelector('#bdStage svg').textContent);
+  assert.ok(svgText.includes('初審與分辦') && svgText.includes('承辦人 3 日內'), svgText.slice(0, 120));
+});
+
+await t('線上可以標字、改虛線、刪掉', async () => {
+  const S = await bdShapes(page);
+  await page.evaluate((id) => window.DDCanvas._select(id), S[0].id);
+  await page.waitForTimeout(250);
+  const row = page.locator('#bdLinks .bdlink').first();
+  assert.equal(await row.count(), 1, '沒有列出這個形狀身上的線');
+  await row.locator('input').fill('收件完成');
+  await page.waitForTimeout(300);
+  assert.equal((await bdLinks(page))[0].label, '收件完成');
+  await row.locator('button[aria-label*="虛線"]').click();
+  await page.waitForTimeout(250);
+  assert.equal((await bdLinks(page))[0].dash, true);
+  await row.locator('button[aria-label="刪掉這條線"]').click();
+  await page.waitForTimeout(250);
+  assert.equal((await bdLinks(page)).length, 0);
+});
+
+await t('刪掉形狀時，連著它的線一起走（不然會留下飄在半空的箭頭）', async () => {
+  await bdTool(page, '步驟').click();
+  await page.locator('#bdText').fill('會被刪掉的');
+  await page.waitForTimeout(200);
+  let S = await bdShapes(page);
+  await page.locator('#bdLinkBtn').click();
+  await bdClick(page, ...bdMid(S[0]));
+  await bdClick(page, ...bdMid(S[S.length - 1]));
+  assert.equal((await bdLinks(page)).length, 1);
+  S = await bdShapes(page);
+  await page.evaluate((id) => window.DDCanvas._select(id), S[S.length - 1].id);
+  await page.waitForTimeout(200);
+  await page.locator('#bdDelBtn').click();
+  await page.waitForTimeout(300);
+  assert.equal((await bdLinks(page)).length, 0, '形狀刪了，線還留著');
+});
+
+await t('復原救得回刪掉的形狀', async () => {
+  const before = (await bdShapes(page)).length;
+  await page.evaluate(() => {
+    const s = window.DDCanvas._board().shapes[0];
+    window.DDCanvas._select(s.id);
+  });
+  await page.waitForTimeout(200);
+  await page.locator('#bdDelBtn').click();
+  await page.waitForTimeout(300);
+  assert.equal((await bdShapes(page)).length, before - 1);
+  assert.ok((await page.locator('#bdTip').innerText()).includes('復原'), '沒有告訴使用者可以復原');
+  await page.locator('#bdUndoBtn').click();
+  await page.waitForTimeout(300);
+  assert.equal((await bdShapes(page)).length, before, '復原沒有救回來');
+});
+
+await t('鍵盤：方向鍵推一格、Delete 刪掉', async () => {
+  const S = await bdShapes(page);
+  await page.evaluate((id) => window.DDCanvas._select(id), S[0].id);
+  await page.waitForTimeout(200);
+  await page.locator('#bdStage').click({ position: { x: 5, y: 5 } });
+  await page.evaluate((id) => window.DDCanvas._select(id), S[0].id);
+  await page.waitForTimeout(150);
+  const x0 = (await bdShapes(page))[0].x;
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(250);
+  assert.equal((await bdShapes(page))[0].x, x0 + 10, '方向鍵沒有推一格');
+  await page.keyboard.press('ArrowLeft');
+  await page.waitForTimeout(250);
+});
+
+await t('畫的東西留在這台電腦裡，重新整理還在', async () => {
+  const before = await bdShapes(page);
+  await page.waitForTimeout(600);
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.locator('#bdStage svg').waitFor({ timeout: 5000 });
+  const after = await bdShapes(page);
+  assert.equal(after.length, before.length, '重新整理之後畫的東西不見了');
+  assert.equal(after[0].text, before[0].text);
+});
+
+await t('畫板的設定檔：存得出來、載得回去，而且座標不會被推歪', async () => {
+  const before = await bdShapes(page);
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 15000 }),
+    page.locator('#bdSaveBtn').click()
+  ]);
+  const text = fs.readFileSync(await download.path(), 'utf8');
+  const json = JSON.parse(text);
+  assert.equal(json.kind, 'board');
+  assert.equal(json.shapes.length, before.length);
+  const projPath = '/tmp/dd-board-proj.json';
+  fs.writeFileSync(projPath, text);
+
+  await page.locator('#bdClearBtn').click();
+  await page.waitForTimeout(300);
+  assert.equal((await bdShapes(page)).length, 0);
+  await page.locator('#bdLoadInput').setInputFiles(projPath);
+  await page.waitForTimeout(700);
+  const after = await bdShapes(page);
+  assert.equal(after.length, before.length);
+  assert.deepEqual(after.map((s) => s.x + ',' + s.y), before.map((s) => s.x + ',' + s.y),
+    '載回來之後座標被推歪了');
+});
+
+await t('載入填表用的設定檔時，講得出「這是另一種設定檔」', async () => {
+  await page.locator('#bdLoadInput').setInputFiles('/tmp/dd-gen-proj.json');
+  await page.waitForTimeout(600);
+  assert.equal(await page.locator('#bdErr').isVisible(), true);
+  const msg = await page.locator('#bdErr').innerText();
+  assert.ok(msg.includes('填表'), msg);
+});
+
+await t('把填表的那張圖搬到畫板：每一格都在，而且拖得動', async () => {
+  await page.goto(server.url + '#/make/flow', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  await page.locator('#makeExampleBtn').click();
+  await page.waitForTimeout(500);
+  assert.equal(await page.locator('#toBoardWrap').isVisible(), true, '流程圖應該看得到搬過去的按鈕');
+  page.once('dialog', (d) => d.accept());
+  await page.locator('#toBoardBtn').click();
+  await page.waitForTimeout(900);
+  assert.equal(new URL(page.url()).hash, '#/board');
+  const S = await bdShapes(page);
+  assert.equal(S.length, 10, '搬過去之後形狀數不對：' + S.length);
+  const texts = S.map((s) => s.text);
+  ['收到來文', '是否本科權責？', '移文他科', '發文並歸檔']
+    .forEach((w) => assert.ok(texts.includes(w), '搬過去之後少了「' + w + '」'));
+  assert.ok((await bdLinks(page)).length >= 8, '線太少');
+  /* 真的拖得動 */
+  const x0 = S[0].x;
+  await bdDrag(page, ...bdMid(S[0]), 200, 60);
+  assert.notEqual((await bdShapes(page))[0].x, x0, '搬過去之後拖不動');
+});
+
+await t('其他六種圖沒有「搬到畫板」那個按鈕（搬過去沒有意義）', async () => {
+  await page.goto(server.url + '#/make/gantt', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  assert.equal(await page.locator('#toBoardWrap').isVisible(), false);
+});
+
+await t('畫板的圖下載得出來，而且一樣帶著來源標註', async () => {
+  await page.goto(server.url + '#/board', { waitUntil: 'networkidle' });
+  await page.locator('#bdStage svg').waitFor({ timeout: 5000 });
+  await page.locator('#edTitleIn').fill('Board 2026');
+  await page.waitForTimeout(400);
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 15000 }),
+    page.locator('#dlSvg').click()
+  ]);
+  const text = fs.readFileSync(await download.path(), 'utf8');
+  assert.ok(text.includes('Board 2026'));
+  assert.ok(text.includes('cathrynlavery/diagram-design'));
+  assert.ok(!text.includes('url(#ddb-grid)'), '匯出的圖不該有格線');
+});
+
 /* ── 每一張圖都要畫得出來 ──────────────────────────────────────────── */
 
 await t('153 張範本逐一開起來，都畫得出圖、都抓得到文字', async () => {
