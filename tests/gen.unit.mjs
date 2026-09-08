@@ -22,7 +22,10 @@ const t = (name, fn) => s.t(name, fn);
 /** 一張圖上看得到的字：把標籤剝掉就好，跨標籤的字串本來就不該當成一個詞。 */
 const words = (svg) => svg.replace(/<[^>]*>/g, '\n');
 const defMeta = (gen) =>
-  (gen.meta || []).reduce((m, f) => { m[f.key] = f.placeholder || ''; return m; }, {});
+  (gen.meta || []).reduce((m, f) => {
+    m[f.key] = f.type === 'select' ? f.options[0].value : (f.placeholder || '');
+    return m;
+  }, {});
 const buildExample = (gen) => gen.build(gen.example, defMeta(gen), {});
 
 /* ── 五種都要長得像同一種東西：規格是表單引擎照著長出畫面的依據 ────────── */
@@ -56,8 +59,9 @@ await t('欄位型別只有表單引擎畫得出來的那幾種，select 一定�
         assert.ok(Array.isArray(f.options) && f.options.length, g.id + '.' + f.key + ' 沒有選項');
       }
     });
-    /* 整張圖共用的設定不可以是下拉或勾選——表單引擎那一段只畫文字框 */
-    (g.meta || []).forEach((f) => assert.equal(f.type, 'text', g.id + ' 的 meta 只收文字'));
+    /* 整張圖共用的設定只收文字與下拉——表單引擎那一段只畫得出這兩種 */
+    (g.meta || []).forEach((f) =>
+      assert.ok(f.type === 'text' || f.type === 'select', g.id + ' 的 meta 只收文字與下拉'));
     /* 每一種都要有一個文字欄位當「主要文字」，退回目標的下拉是照它長的 */
     assert.ok(g.fields.some((f) => f.type === 'text'), g.id + ' 沒有文字欄位');
   });
@@ -683,8 +687,35 @@ await t('關係圖：排滿一列就換下一列，勾「另起一列」可以�
   assert.ok(relY(two, '丙') > relY(two, '甲'), '一列兩個時第三個沒有換列');
 });
 
+await t('關係圖：橫式時由上而下排、欄由左而右，直式時剛好相反', () => {
+  const x = (svg, name) => {
+    const before = svg.slice(0, svg.indexOf('>' + name + '<'));
+    const m = /<text x="([\d.]+)"/g;
+    let last = null, r;
+    while ((r = m.exec(before))) last = r;
+    return +last[1];
+  };
+  const rows = [B('甲'), B('乙'), B('丙')];
+  const down = relSvg(rows, { dir: 'down', cols: '1' });
+  /* 直式、一列一個：三個疊成一直行，x 相同、y 遞增 */
+  assert.equal(x(down, '甲'), x(down, '丙'), '直式一列一個卻沒有對齊在同一直行');
+  assert.ok(relY(down, '丙') > relY(down, '甲'), '直式沒有往下排');
+  const right = relSvg(rows, { dir: 'right', cols: '1' });
+  /* 橫式、一欄一個：三個排成一橫排，y 相同、x 遞增 */
+  assert.equal(relY(right, '甲'), relY(right, '丙'), '橫式一欄一個卻沒有對齊在同一橫排');
+  assert.ok(x(right, '丙') > x(right, '甲'), '橫式沒有往右排');
+});
+
+await t('關係圖：橫式的每一欄垂直置中，短的那一欄不會吊在上面', () => {
+  const svg = relSvg([B('甲'), B('乙'), B('丙', { br: true })], { dir: 'right', cols: '2' });
+  /* 左欄兩個、右欄一個：右欄那一個要落在左欄兩個的中間高度 */
+  const mid = (relY(svg, '甲') + relY(svg, '乙')) / 2;
+  assert.ok(Math.abs(relY(svg, '丙') - mid) < 12,
+    '右欄沒有垂直置中：' + relY(svg, '丙') + ' vs ' + mid);
+});
+
 await t('關係圖：「每列幾個」填了看不懂的字要講一聲，而且照樣畫得出來', () => {
-  const out = rel.build([B('甲'), B('乙')], { cols: '兩個' }, {});
+  const out = rel.build([B('甲'), B('乙')], { dir: 'down', cols: '兩個' }, {});
   assert.equal(out.warnings.length, 1);
   assert.match(out.warnings[0], /兩個/);
   assert.match(out.warnings[0], /自動/);

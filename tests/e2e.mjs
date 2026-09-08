@@ -990,7 +990,34 @@ await t('關係圖也分兩區塊：方塊填夠兩個之前，連線的「＋�
   assert.equal(await addLink.isDisabled(), false, '填了兩個方塊還是不給拉線');
 });
 
+await t('關係圖：切成橫式，方塊就從「一列一列」變成「一欄一欄」', async () => {
+  await page.goto(server.url + '#/make/relation', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  await page.locator('#makeExampleBtn').click();
+  await page.waitForTimeout(500);
+  const box = () => page.evaluate(() => {
+    const b = document.querySelector('#stage svg').viewBox.baseVal;
+    return { w: b.width, h: b.height };
+  });
+  const before = await box();
+  await page.locator('#m_relation_dir').selectOption('right');
+  await page.waitForTimeout(600);
+  const after = await box();
+  assert.ok(after.h < before.h, '切成橫式圖卻沒有變矮：' + before.h + ' → ' + after.h);
+  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(svgText.includes('國營事業'), '切了方向字就不見了');
+  await page.locator('#m_relation_dir').selectOption('down');
+  await page.waitForTimeout(500);
+});
+
 await t('關係圖：加一條連線，圖上就多一條線，線上的字也畫得出來', async () => {
+  await page.locator('#makeClearBtn').click();
+  await page.waitForTimeout(400);
+  await page.locator('#f_relation_0_text').fill('甲單位');
+  await page.locator('.fgroup').first().locator('button.fadd').click();
+  await page.waitForTimeout(300);
+  await page.locator('#f_relation_1_text').fill('乙單位');
+  await page.waitForTimeout(500);
   await page.locator('.fgroup').nth(1).locator('button.fadd').click();
   await page.waitForTimeout(400);
   const lines = () => page.evaluate(() =>

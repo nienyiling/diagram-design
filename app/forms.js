@@ -106,7 +106,10 @@
   function defaultState(gen) {
     return {
       rows: JSON.parse(JSON.stringify(gen.example)),
-      meta: (gen.meta || []).reduce(function (m, f) { m[f.key] = f.placeholder || ''; return m; }, {})
+      meta: (gen.meta || []).reduce(function (m, f) {
+        m[f.key] = f.type === 'select' ? f.options[0].value : (f.placeholder || '');
+        return m;
+      }, {})
     };
   }
 
@@ -453,18 +456,31 @@
     el.makeMetaWrap.hidden = !(gen.meta && gen.meta.length);
     (gen.meta || []).forEach(function (f) {
       var wrap = document.createElement('div');
-      wrap.className = 'fcell wide';
+      wrap.className = 'fcell' + (f.width ? '' : ' wide');
+      if (f.width) wrap.style.setProperty('--fw', f.width);
       var id = 'm_' + gen.id + '_' + f.key;
       var lab = document.createElement('label');
       lab.className = 'fl';
       lab.setAttribute('for', id);
       lab.textContent = f.label;
-      var input = document.createElement('input');
-      input.type = 'text';
+      var input;
+      if (f.type === 'select') {
+        input = document.createElement('select');
+        f.options.forEach(function (o) {
+          var op = document.createElement('option');
+          op.value = o.value;
+          op.textContent = o.label;
+          input.appendChild(op);
+        });
+        input.value = st.meta[f.key] == null ? f.options[0].value : String(st.meta[f.key]);
+      } else {
+        input = document.createElement('input');
+        input.type = 'text';
+        input.value = st.meta[f.key] == null ? '' : st.meta[f.key];
+        if (f.placeholder) input.placeholder = f.placeholder;
+      }
       input.id = id;
-      input.value = st.meta[f.key] == null ? '' : st.meta[f.key];
-      if (f.placeholder) input.placeholder = f.placeholder;
-      input.addEventListener('input', function () {
+      input.addEventListener(f.type === 'select' ? 'change' : 'input', function () {
         st.meta[f.key] = input.value;
         persist();
         schedulePreview();

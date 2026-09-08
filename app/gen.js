@@ -1780,6 +1780,10 @@
     { value: 'both', label: '雙向 ↔' },
     { value: 'none', label: '不加箭頭' }
   ];
+  var REL_DIR_OPTIONS = [
+    { value: 'down', label: '直式（由上而下）' },
+    { value: 'right', label: '橫式（由左而右）' }
+  ];
   var REL_KIND_OPTIONS = [
     { value: 'box', label: '方塊' },
     { value: 'link', label: '連線' }
@@ -1807,7 +1811,8 @@
     rowName: '列',
     help: [
       '先填方塊，填寫完畢後再拉連線。',
-      '方塊由左而右排，排滿一列就換下一列；要提早換列就勾「另起一列」。',
+      '直式是由左而右排、排滿一列換下一列；橫式是由上而下排、排滿一欄換下一欄。',
+      '要提早換到下一列（欄）就勾「另起一列」。',
       '文字太長會自動折行，想自己決定在哪裡斷，就在要斷的地方打一個「/」。'
     ],
     groups: [
@@ -1822,7 +1827,7 @@
       { key: 'line', label: '框線', type: 'select', options: BOX_LINE_OPTIONS, width: '104px', only: 'box' },
       { key: 'fill', label: '底色', type: 'select', options: BOX_FILL_OPTIONS, width: '104px', only: 'box' },
       { key: 'br', label: '另起一列', type: 'check', width: '92px', only: 'box',
-        hint: '這個方塊改從下一列的最左邊開始排' },
+        hint: '直式：從下一列的最左邊開始；橫式：從下一欄的最上面開始' },
 
       { key: 'from', label: '從', type: 'rowref', width: '170px', only: 'link' },
       { key: 'to', label: '到', type: 'rowref', width: '170px', only: 'link' },
@@ -1831,7 +1836,8 @@
       { key: 'label', label: '線上的字（可留空）', type: 'text', only: 'link' }
     ],
     meta: [
-      { key: 'cols', label: '每列幾個方塊（留空＝自動）', type: 'text' }
+      { key: 'dir', label: '排列方向', type: 'select', options: REL_DIR_OPTIONS, width: '190px' },
+      { key: 'cols', label: '每列（欄）幾個方塊，留空＝自動', type: 'text', width: '220px' }
     ],
     example: [
       { kind: 'box', text: '國營事業', line: 'solid', fill: 'soft' },
@@ -1882,39 +1888,47 @@
           warnings: warnings, count: 0 };
       }
 
-      /* ── 排列：由左而右填滿一列再換下一列 ───────────────────────── */
+      /* ── 排列 ─────────────────────────────────────────────────────
+         直式：一條「線」是一列，方塊由左而右；橫式：一條「線」是一欄，由上而下。
+         兩種只差在把 x／y 對調，所以先分組、再依方向擺，不要寫成兩份版面程式。 */
+      var horiz = optValue(REL_DIR_OPTIONS, meta && meta.dir) === 'right';
       var want = parseInt(String((meta && meta.cols) || '').replace(/[^\d]/g, ''), 10);
       if (String((meta && meta.cols) || '').trim() && !(want >= 1)) {
-        warnings.push('「每列幾個方塊」要填一個 1 以上的數字，' +
+        warnings.push('「每列（欄）幾個方塊」要填一個 1 以上的數字，' +
           '填的是「' + meta.cols + '」，先當成自動排。');
       }
-      var perRow = want >= 1 ? Math.min(want, 6)
+      var per = want >= 1 ? Math.min(want, 6)
         : (boxes.length <= 3 ? boxes.length : (boxes.length <= 6 ? 3 : 4));
 
       var lines = [], cur = [];
       boxes.forEach(function (b, i) {
-        if (i && (b.br || cur.length >= perRow)) { lines.push(cur); cur = []; }
+        if (i && (b.br || cur.length >= per)) { lines.push(cur); cur = []; }
         cur.push(b);
       });
       if (cur.length) lines.push(cur);
 
-      var widest = lines.reduce(function (m, r) { return Math.max(m, r.length); }, 1);
       var avail = REL.W - REL.left * 2;
+      /* 直式：一列最多幾個決定欄寬；橫式：有幾欄決定欄寬 */
+      var across = horiz ? lines.length : lines.reduce(function (m, r) {
+        return Math.max(m, r.length);
+      }, 1);
 
-      /* 同一列的兩個方塊之間有字時，欄距要讓得下那句話——不然「體制內不衡平」
+      /* 左右相鄰的兩個方塊之間有字時，欄距要讓得下那句話——不然「體制內不衡平」
          會擠在 26px 的縫裡，兩邊都壓到方塊上。 */
-      var rowOf = {};
-      lines.forEach(function (r, n) { r.forEach(function (b) { rowOf[b.text] = n; }); });
+      var lineOf = {};
+      lines.forEach(function (r, n) { r.forEach(function (b) { lineOf[b.text] = n; }); });
       var needGap = REL.gapX;
       links.forEach(function (l) {
         if (!l.label) return;
-        var ra = rowOf[l.aName], rb = rowOf[l.bName];
-        if (ra == null || rb == null || ra !== rb) return;
+        var la = lineOf[l.aName], lb = lineOf[l.bName];
+        if (la == null || lb == null) return;
+        /* 直式的左右鄰居是「同一列」，橫式的左右鄰居是「不同欄」 */
+        if (horiz ? la === lb : la !== lb) return;
         needGap = Math.max(needGap, Math.round(DD.textUnits(l.label) * 10) + 20);
       });
-      var gapX = Math.min(needGap, Math.floor(avail / (widest + 1)));
+      var gapX = Math.min(needGap, Math.floor(avail / (across + 1)));
 
-      var bw = Math.floor((avail - (widest - 1) * gapX) / widest);
+      var bw = Math.floor((avail - (across - 1) * gapX) / across);
       var maxChars = Math.max(4, (bw - REL.pad * 2) / REL.fs);
 
       /* 折行：使用者打的「/」是自己決定的斷點，其餘照寬度折 */
@@ -1924,23 +1938,45 @@
           var got = DD.wrapLabel(part, maxChars);
           b.lines = b.lines.concat(got.length ? got : ['']);
         });
+        b.need = Math.round(Math.max(REL.minH, b.lines.length * (REL.fs * 1.45) + REL.pad * 2));
       });
 
-      var y = REL.top;
-      lines.forEach(function (rowBoxes) {
-        var h = rowBoxes.reduce(function (m, b) {
-          return Math.max(m, REL.minH, b.lines.length * (REL.fs * 1.45) + REL.pad * 2);
-        }, REL.minH);
-        var rowW = rowBoxes.length * bw + (rowBoxes.length - 1) * gapX;
-        var x = Math.round((REL.W - rowW) / 2);
-        rowBoxes.forEach(function (b) {
-          b.x = x; b.y = y; b.w = bw; b.h = Math.round(h);
-          b.cx = x + bw / 2; b.cy = y + h / 2;
-          x += bw + gapX;
+      var H;
+      if (!horiz) {
+        var y = REL.top;
+        lines.forEach(function (rowBoxes) {
+          var h = rowBoxes.reduce(function (m, b) { return Math.max(m, b.need); }, REL.minH);
+          var rowW = rowBoxes.length * bw + (rowBoxes.length - 1) * gapX;
+          var x = Math.round((REL.W - rowW) / 2);
+          rowBoxes.forEach(function (b) {
+            b.x = x; b.y = y; b.w = bw; b.h = h;
+            b.cx = x + bw / 2; b.cy = y + h / 2;
+            x += bw + gapX;
+          });
+          y += h + REL.gapY;
         });
-        y += Math.round(h) + REL.gapY;
-      });
-      var H = y - REL.gapY + 34;
+        H = y - REL.gapY + 34;
+      } else {
+        /* 橫式：每一欄自己往下疊，欄與欄之間垂直置中對齊，短的那一欄才不會吊在上面 */
+        var tall = lines.reduce(function (m, col) {
+          return Math.max(m, col.reduce(function (n, b) { return n + b.need; }, 0) +
+            (col.length - 1) * REL.gapY);
+        }, REL.minH);
+        var colW = lines.length * bw + (lines.length - 1) * gapX;
+        var cx0 = Math.round((REL.W - colW) / 2);
+        lines.forEach(function (col, n) {
+          var colH = col.reduce(function (m, b) { return m + b.need; }, 0) +
+            (col.length - 1) * REL.gapY;
+          var cy0 = REL.top + Math.round((tall - colH) / 2);
+          var x = cx0 + n * (bw + gapX);
+          col.forEach(function (b) {
+            b.x = x; b.y = cy0; b.w = bw; b.h = b.need;
+            b.cx = x + bw / 2; b.cy = cy0 + b.need / 2;
+            cy0 += b.need + REL.gapY;
+          });
+        });
+        H = REL.top + tall + 34;
+      }
 
       /* ── 畫 ──────────────────────────────────────────────────────── */
       var out = [canvasOpen(H, '關係圖')];
