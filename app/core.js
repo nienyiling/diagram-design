@@ -922,6 +922,396 @@
 
   var EMU = 9525;   /* 1 px = 9525 EMU */
 
+  /* ── 把自己畫的 SVG 換成 Word 原生圖案 ──────────────────────────────────
+   *
+   * Word 的「轉換成圖形」靠不住：實測 Word 2019 轉一張家系圖，68 個圖形進去、
+   * 51 個 Word 圖案出來，**32 段文字一個都沒留**——姓名、年齡、婚姻狀態全不見，
+   * 只剩一堆線條。所以下載的 .docx 不再指望那一步：這裡直接把每一條線、
+   * 每一個框、每一行字都寫成 Word 自己的圖案（DrawingML 的 wpg 群組），
+   * 檔案打開就能拖、就能改字，不必按右鍵轉換。
+   *
+   * 只認得我們自己畫圖用的那幾種標籤。範本庫那 153 張是別人寫的任意 SVG
+   * （CSS class、漸層、巢狀 svg、foreignObject 都有），一律回 null 讓 buildDocx
+   * 退回原本的圖片——猜著轉會產出一張缺東少西的圖，比一張不能編輯的圖更糟。
+   */
+
+  var WORD_TAGS = /<(rect|circle|line|polyline|polygon|path|text)\b[^>]*(?:\/>|>([\s\S]*?)<\/\1>)/g;
+
+  /** 量寬度前要先把 &amp; 這種還原回來，不然一個 & 會被當成五個字。 */
+  function unescapeXml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+      .replace(/&amp;/g, '&');
+  }
+
+  function svgAttrs(str) {
+    /* 屬性名字裡有數字（x1、y2…），字元類別漏了 0-9 的話整條線的座標都會變成 0 */
+    var out = {}, re = /([a-zA-Z_:][\w.:-]*)\s*=\s*"([^"]*)"/g, m;
+    while ((m = re.exec(str))) out[m[1]] = m[2];
+    return out;
+  }
+
+  /** 數字屬性；`100%` 這種要拿整張圖的寬高去換算。 */
+  function svgNum(v, alt, full) {
+    if (v == null) return alt;
+    var s = String(v).trim();
+    if (/%$/.test(s)) return (parseFloat(s) / 100) * (full || 0);
+    var n = parseFloat(s);
+    return isFinite(n) ? n : alt;
+  }
+
+  /** 顏色 → {hex, alpha}。`none` 與 `url(#網點)` 回 null：Word 沒有對應的東西。 */
+  function wordColor(v) {
+    var s = v == null ? '' : String(v).trim();
+    if (!s || s === 'none' || s.indexOf('url(') === 0) return null;
+    var m = /^#([0-9a-fA-F]{3})$/.exec(s);
+    if (m) {
+      return { hex: m[1].replace(/./g, function (c) { return c + c; }).toUpperCase(), alpha: 1 };
+    }
+    m = /^#([0-9a-fA-F]{6})$/.exec(s);
+    if (m) return { hex: m[1].toUpperCase(), alpha: 1 };
+    m = /^rgba?\(([^)]+)\)$/i.exec(s);
+    if (m) {
+      var p = m[1].split(',').map(function (x) { return parseFloat(x); });
+      if (p.length < 3 || !isFinite(p[0]) || !isFinite(p[1]) || !isFinite(p[2])) return null;
+      var hex = p.slice(0, 3).map(function (n) {
+        var h = Math.max(0, Math.min(255, Math.round(n))).toString(16);
+        return h.length < 2 ? '0' + h : h;
+      }).join('').toUpperCase();
+      return { hex: hex, alpha: p.length > 3 && isFinite(p[3]) ? Math.max(0, Math.min(1, p[3])) : 1 };
+    }
+    return null;
+  }
+
+  function wordFill(c, opacity) {
+    if (!c) return '<a:noFill/>';
+    var a = c.alpha * (opacity == null ? 1 : opacity);
+    return '<a:solidFill><a:srgbClr val="' + c.hex + '">' +
+      (a < 1 ? '<a:alpha val="' + Math.round(a * 100000) + '"/>' : '') +
+      '</a:srgbClr></a:solidFill>';
+  }
+
+  function wordLine(a, k, opacity) {
+    var c = wordColor(a.stroke);
+    if (!c) return '<a:ln><a:noFill/></a:ln>';
+    var w = Math.max(1, Math.round(svgNum(a['stroke-width'], 1, 0) * k));
+    var dash = '';
+    if (a['stroke-dasharray']) {
+      var first = parseFloat(String(a['stroke-dasharray']).split(/[\s,]+/)[0]);
+      dash = '<a:prstDash val="' + (first <= 2.5 ? 'sysDot' : 'dash') + '"/>';
+    }
+    return '<a:ln w="' + w + '" cap="rnd">' + wordFill(c, opacity) + dash + '<a:round/>' +
+      (a['marker-end'] ? '<a:tailEnd type="triangle" w="med" len="med"/>' : '') + '</a:ln>';
+  }
+
+  /** d 屬性 → 幾條子路徑。只吃絕對座標的 M/L/H/V/C/Z——我們自己只畫這些。 */
+  function parsePathD(d) {
+    var toks = String(d == null ? '' : d).match(/[A-Za-z]|-?\d*\.?\d+/g);
+    if (!toks) return null;
+    var paths = [], cur = null, i = 0, cmd = '', px = 0, py = 0;
+    function n() { return parseFloat(toks[i++]); }
+    while (i < toks.length) {
+      if (/^[A-Za-z]$/.test(toks[i])) cmd = toks[i++];
+      if (cmd === 'Z' || cmd === 'z') { if (cur) cur.close = true; cmd = ''; continue; }
+      if (i >= toks.length) break;
+      if ('MLHVC'.indexOf(cmd) < 0) return null;
+      if (cmd === 'M') {
+        px = n(); py = n();
+        if (!isFinite(px) || !isFinite(py)) return null;
+        cur = { ops: [{ t: 'm', pts: [[px, py]] }], close: false };
+        paths.push(cur);
+        cmd = 'L';                       /* M 後面再接一組座標就是隱含的 L */
+        continue;
+      }
+      if (!cur) return null;
+      if (cmd === 'H' || cmd === 'V') {
+        var one = n();
+        if (!isFinite(one)) return null;
+        if (cmd === 'H') px = one; else py = one;
+        cur.ops.push({ t: 'l', pts: [[px, py]] });
+        continue;
+      }
+      if (cmd === 'L') {
+        var lx = n(), ly = n();
+        if (!isFinite(lx) || !isFinite(ly)) return null;
+        cur.ops.push({ t: 'l', pts: [[lx, ly]] });
+        px = lx; py = ly;
+        continue;
+      }
+      var c1x = n(), c1y = n(), c2x = n(), c2y = n(), ex = n(), ey = n();
+      if ([c1x, c1y, c2x, c2y, ex, ey].some(function (v) { return !isFinite(v); })) return null;
+      cur.ops.push({ t: 'c', pts: [[c1x, c1y], [c2x, c2y], [ex, ey]] });
+      px = ex; py = ey;
+    }
+    return paths.length ? paths : null;
+  }
+
+  function pointsList(str) {
+    var nums = String(str == null ? '' : str).match(/-?\d*\.?\d+/g);
+    if (!nums || nums.length < 4 || nums.length % 2) return null;
+    var pts = [];
+    for (var i = 0; i < nums.length; i += 2) pts.push([parseFloat(nums[i]), parseFloat(nums[i + 1])]);
+    return pts;
+  }
+
+  /** 中文字一個字寬約一個字高，英數字約 0.55——用來估文字方塊要多寬。 */
+  function textEm(s) {
+    var em = 0;
+    String(s).split('').forEach(function (ch) {
+      em += ch.charCodeAt(0) > 0x2e7f ? 1 : 0.55;
+    });
+    return em;
+  }
+
+  function xfrmXml(x, y, w, h, flipH, flipV) {
+    return '<a:xfrm' + (flipH ? ' flipH="1"' : '') + (flipV ? ' flipV="1"' : '') + '>' +
+      '<a:off x="' + Math.round(x) + '" y="' + Math.round(y) + '"/>' +
+      '<a:ext cx="' + Math.max(0, Math.round(w)) + '" cy="' + Math.max(0, Math.round(h)) + '"/></a:xfrm>';
+  }
+
+  var WORD_BODY = '<wps:bodyPr rot="0" vert="horz" wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" ' +
+    'anchor="ctr" anchorCtr="0"><a:noAutofit/></wps:bodyPr>';
+
+  function wordWsp(id, name, xfrm, geom, fill, ln, txbx, bodyPr) {
+    return '<wps:wsp><wps:cNvPr id="' + id + '" name="' + escapeXml(name) + '"/>' +
+      '<wps:cNvSpPr' + (txbx ? ' txBox="1"' : '') + '/><wps:spPr>' +
+      xfrm + geom + fill + ln + '</wps:spPr>' + (txbx || '') + (bodyPr || WORD_BODY) + '</wps:wsp>';
+  }
+
+  /** 折線／多邊形／path 共用：一串點 → custGeom。座標是相對外框的。 */
+  function custGeomXml(paths, minX, minY, k, cx, cy) {
+    var pw = Math.max(1, Math.round(cx)), ph = Math.max(1, Math.round(cy));
+    function pt(p) {
+      return '<a:pt x="' + Math.round((p[0] - minX) * k) + '" y="' + Math.round((p[1] - minY) * k) + '"/>';
+    }
+    var body = paths.map(function (sub) {
+      var ops = sub.ops.map(function (op) {
+        if (op.t === 'm') return '<a:moveTo>' + pt(op.pts[0]) + '</a:moveTo>';
+        if (op.t === 'l') return '<a:lnTo>' + pt(op.pts[0]) + '</a:lnTo>';
+        return '<a:cubicBezTo>' + op.pts.map(pt).join('') + '</a:cubicBezTo>';
+      }).join('');
+      return '<a:path w="' + pw + '" h="' + ph + '">' + ops + (sub.close ? '<a:close/>' : '') + '</a:path>';
+    }).join('');
+    return '<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/>' +
+      '<a:rect l="0" t="0" r="' + pw + '" b="' + ph + '"/><a:pathLst>' + body + '</a:pathLst></a:custGeom>';
+  }
+
+  /** 這張圖換不換得成 Word 圖案。畫面上要據此講不同的話，別讓使用者去猜。 */
+  function wordShapesOk(svg) {
+    return svgToWordGroup(svg, { scale: 1 }) !== null;
+  }
+
+  /** 巢狀 <svg>：切出「前面、這一塊、後面」。深度要數，不然遇到更裡面那層會切錯。 */
+  function splitNestedSvg(body) {
+    var i = body.indexOf('<svg');
+    if (i < 0) return null;
+    var re = /<svg\b|<\/svg>/g, depth = 0, m, end = -1;
+    re.lastIndex = i;
+    while ((m = re.exec(body))) {
+      if (m[0] === '</svg>') { depth--; if (!depth) { end = m.index + 6; break; } }
+      else depth++;
+    }
+    if (end < 0) return null;
+    return { before: body.slice(0, i), inner: body.slice(i, end), after: body.slice(end) };
+  }
+
+  /**
+   * 一層 SVG 的內容 → 一串 Word 圖案，推進 ctx.shapes。
+   * dx／dy／s 是「這一層的座標怎麼換算成最外層的座標」（巢狀 svg 會疊上去）。
+   * 認不得的東西回 false，整張圖就不轉了——少畫一塊比不能編輯更糟。
+   */
+  function walkSvgShapes(body, dx, dy, s, ctx) {
+    var clean = body.replace(/<defs>[\s\S]*?<\/defs>/g, '');
+    var nest = splitNestedSvg(clean);
+    if (nest) {
+      if (!walkSvgShapes(nest.before, dx, dy, s, ctx)) return false;
+      var open = /<svg\b[^>]*>/.exec(nest.inner);
+      var a0 = svgAttrs(open[0]);
+      var vb0 = String(a0.viewBox || '').trim().split(/\s+/).map(Number);
+      var iw = svgNum(a0.width, NaN, 0), ih = svgNum(a0.height, NaN, 0);
+      if (vb0.length !== 4 || !(vb0[2] > 0) || !(vb0[3] > 0) || !(iw > 0) || !(ih > 0)) return false;
+      var sx = iw / vb0[2], sy = ih / vb0[3];
+      /* 非等比縮放的巢狀圖我們自己不會產，也不猜 */
+      if (Math.abs(sx - sy) > 0.001) return false;
+      var body0 = nest.inner.replace(/<svg\b[^>]*>/, '').replace(/<\/svg>$/, '');
+      var ok = walkSvgShapes(body0,
+        dx + (svgNum(a0.x, 0, 0) - vb0[0] * sx) * s,
+        dy + (svgNum(a0.y, 0, 0) - vb0[1] * sy) * s, s * sx, ctx);
+      if (!ok) return false;
+      return walkSvgShapes(nest.after, dx, dy, s, ctx);
+    }
+
+    /* 認不得的標籤（範本庫的 g、style、image…）就整張放棄，不要猜 */
+    WORD_TAGS.lastIndex = 0;
+    if (/<[a-zA-Z]/.test(clean.replace(WORD_TAGS, ''))) return false;
+
+    var k = ctx.k, m;
+    var X = function (v) { return (dx + v * s) * k; };
+    var Y = function (v) { return (dy + v * s) * k; };
+    var L = function (v) { return v * s * k; };
+    WORD_TAGS.lastIndex = 0;
+    while ((m = WORD_TAGS.exec(clean))) {
+      var tag = m[1], a = svgAttrs(m[0].slice(tag.length + 1).replace(/\/?>$/, ''));
+      var op = a.opacity == null ? 1 : svgNum(a.opacity, 1, 0);
+      var fill = wordColor(a.fill), stroke = wordColor(a.stroke);
+      if (tag !== 'text' && !fill && !stroke) continue;   /* 網點底之類的，畫不出來就別畫 */
+      var ln = wordLine(a, s * k, op);
+
+      if (tag === 'rect') {
+        var rw = svgNum(a.width, 0, ctx.W), rh = svgNum(a.height, 0, ctx.H);
+        if (!(rw > 0 && rh > 0)) continue;
+        var round = svgNum(a.rx, 0, 0);
+        var geom = round > 0
+          ? '<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ' +
+            Math.max(0, Math.min(50000, Math.round(round / (Math.min(rw, rh) / 2) * 50000))) +
+            '"/></a:avLst></a:prstGeom>'
+          : '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>';
+        ctx.shapes.push(wordWsp(ctx.id++, '方塊 ' + ctx.id,
+          xfrmXml(X(svgNum(a.x, 0, ctx.W)), Y(svgNum(a.y, 0, ctx.H)), L(rw), L(rh)),
+          geom, wordFill(fill, op), ln));
+        continue;
+      }
+      if (tag === 'circle') {
+        var r = svgNum(a.r, 0, 0);
+        if (!(r > 0)) continue;
+        ctx.shapes.push(wordWsp(ctx.id++, '圓 ' + ctx.id,
+          xfrmXml(X(svgNum(a.cx, 0, ctx.W) - r), Y(svgNum(a.cy, 0, ctx.H) - r), L(2 * r), L(2 * r)),
+          '<a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom>', wordFill(fill, op), ln));
+        continue;
+      }
+      if (tag === 'line') {
+        var x1 = svgNum(a.x1, 0, ctx.W), y1 = svgNum(a.y1, 0, ctx.H);
+        var x2 = svgNum(a.x2, 0, ctx.W), y2 = svgNum(a.y2, 0, ctx.H);
+        ctx.shapes.push(wordWsp(ctx.id++, '線 ' + ctx.id,
+          xfrmXml(X(Math.min(x1, x2)), Y(Math.min(y1, y2)),
+            L(Math.abs(x2 - x1)), L(Math.abs(y2 - y1)), x2 < x1, y2 < y1),
+          '<a:prstGeom prst="line"><a:avLst/></a:prstGeom>', '<a:noFill/>', ln));
+        continue;
+      }
+      if (tag === 'polyline' || tag === 'polygon' || tag === 'path') {
+        var subs;
+        if (tag === 'path') {
+          subs = parsePathD(a.d);
+        } else {
+          var pts = pointsList(a.points);
+          if (!pts) continue;
+          subs = [{ ops: pts.map(function (p, n2) { return { t: n2 ? 'l' : 'm', pts: [p] }; }),
+            close: tag === 'polygon' }];
+        }
+        if (!subs) return false;          /* 看不懂的路徑就整張放棄，不要少畫一段 */
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        subs.forEach(function (sub) {
+          sub.ops.forEach(function (o2) {
+            o2.pts.forEach(function (p) {
+              if (p[0] < minX) minX = p[0];
+              if (p[0] > maxX) maxX = p[0];
+              if (p[1] < minY) minY = p[1];
+              if (p[1] > maxY) maxY = p[1];
+            });
+          });
+        });
+        if (!isFinite(minX)) continue;
+        var cw = L(maxX - minX), ch = L(maxY - minY);
+        ctx.shapes.push(wordWsp(ctx.id++, '線條 ' + ctx.id, xfrmXml(X(minX), Y(minY), cw, ch),
+          custGeomXml(subs, minX, minY, s * k, cw, ch), wordFill(fill, op), ln));
+        continue;
+      }
+
+      /* text：SVG 的 y 是基線，Word 的文字方塊是一個框，換算一次。
+         多行的標題是用 <tspan dy> 疊出來的，一行做一個文字方塊。 */
+      var raw = String(m[2] == null ? '' : m[2]);
+      var fs = svgNum(a['font-size'], 12, 0);
+      var lines = [];
+      if (raw.indexOf('<tspan') >= 0) {
+        var tre = /<tspan\b([^>]*)>([\s\S]*?)<\/tspan>/g, tm, ty = svgNum(a.y, 0, ctx.H);
+        while ((tm = tre.exec(raw))) {
+          var ta = svgAttrs(tm[1]);
+          ty += svgNum(ta.dy, 0, 0);
+          lines.push({ x: svgNum(ta.x, svgNum(a.x, 0, ctx.W), ctx.W), y: ty, s: tm[2] });
+        }
+      } else {
+        lines.push({ x: svgNum(a.x, 0, ctx.W), y: svgNum(a.y, 0, ctx.H), s: raw });
+      }
+      lines.forEach(function (line) {
+        var str = line.s.replace(/<[^>]*>/g, '');
+        if (!str) return;
+        var spacing = /em$/.test(String(a['letter-spacing'] || '')) ? parseFloat(a['letter-spacing']) : 0;
+        var em = textEm(unescapeXml(str)) * (1 + (spacing || 0));
+        var boxW = (em + 1.2) * fs;
+        var anchor = a['text-anchor'] || 'start';
+        var left = anchor === 'middle' ? line.x - boxW / 2
+          : (anchor === 'end' ? line.x - boxW + fs * 0.6 : line.x - fs * 0.6);
+        var jc = anchor === 'middle' ? 'center' : (anchor === 'end' ? 'right' : 'left');
+        var fams = String(a['font-family'] || '').split(',').map(function (f) {
+          return f.trim().replace(/^['"]|['"]$/g, '');
+        }).filter(Boolean);
+        var ascii = '', east = '';
+        fams.forEach(function (f) {
+          if (/^[\x20-\x7e]+$/.test(f)) { if (!ascii) ascii = f; } else if (!east) east = f;
+        });
+        if (!ascii) ascii = east || 'serif';
+        if (!east) east = ascii;
+        var col = wordColor(a.fill) || { hex: '000000', alpha: 1 };
+        var sz = Math.max(2, Math.round(fs * s * ctx.scale * 1.5));   /* px → 半點（96dpi） */
+        var rpr = '<w:rPr><w:rFonts w:ascii="' + escapeXml(ascii) + '" w:hAnsi="' + escapeXml(ascii) +
+          '" w:eastAsia="' + escapeXml(east) + '" w:cs="' + escapeXml(ascii) + '"/>' +
+          (svgNum(a['font-weight'], 400, 0) >= 600 ? '<w:b/><w:bCs/>' : '') +
+          '<w:color w:val="' + col.hex + '"/>' +
+          (spacing ? '<w:spacing w:val="' + Math.round(spacing * fs * s * ctx.scale * 15) + '"/>' : '') +
+          '<w:sz w:val="' + sz + '"/><w:szCs w:val="' + sz + '"/></w:rPr>';
+        var para = '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/>' +
+          '<w:jc w:val="' + jc + '"/>' + rpr + '</w:pPr>' +
+          '<w:r>' + rpr + '<w:t xml:space="preserve">' + str + '</w:t></w:r></w:p>';
+        ctx.shapes.push(wordWsp(ctx.id++, '文字 ' + ctx.id,
+          xfrmXml(X(left), Y(line.y - fs * 1.15), L(boxW), L(fs * 1.6)),
+          '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>', '<a:noFill/>', '<a:ln><a:noFill/></a:ln>',
+          '<wps:txbx><w:txbxContent>' + para + '</w:txbxContent></wps:txbx>',
+          '<wps:bodyPr rot="0" vert="horz" wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" ' +
+          'anchor="ctr" anchorCtr="0"><a:noAutofit/></wps:bodyPr>'));
+      });
+    }
+    return true;
+  }
+
+  /**
+   * SVG → Word 圖案群組（`<w:drawing>` 整段）。認不得就回 null。
+   *   o.scale  SVG 單位 → 頁面 px 的縮放（跟圖片版用的是同一個）
+   *   o.title  群組名稱，也是替代文字
+   */
+  function svgToWordGroup(svg, o) {
+    var opt = o || {};
+    var src = String(svg == null ? '' : svg);
+    var open = /<svg\b[^>]*>/.exec(src);
+    if (!open) return null;
+    var vb = /viewBox="([-\d.\s]+)"/.exec(open[0]);
+    if (!vb) return null;
+    var box = vb[1].trim().split(/\s+/).map(Number);
+    if (box.length !== 4 || box[0] !== 0 || box[1] !== 0 || !(box[2] > 0) || !(box[3] > 0)) return null;
+
+    var scale = opt.scale || 1;
+    var ctx = { shapes: [], id: 2, k: scale * EMU, scale: scale, W: box[2], H: box[3] };
+    var body = src.slice(open.index + open[0].length).replace(/<\/svg>\s*$/, '');
+    if (!walkSvgShapes(body, 0, 0, 1, ctx)) return null;
+    if (!ctx.shapes.length) return null;
+
+    var cx = Math.round(box[2] * ctx.k), cy = Math.round(box[3] * ctx.k);
+    var name = escapeXml(String(opt.title || '圖'));
+    return '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing>' +
+      '<wp:inline distT="0" distB="0" distL="0" distR="0">' +
+      '<wp:extent cx="' + cx + '" cy="' + cy + '"/>' +
+      '<wp:effectExtent l="0" t="0" r="0" b="0"/>' +
+      '<wp:docPr id="1" name="' + name + '" descr="' + name + '"/>' +
+      '<wp:cNvGraphicFramePr/>' +
+      '<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup">' +
+      '<wpg:wgp><wpg:cNvGrpSpPr/><wpg:grpSpPr>' +
+      '<a:xfrm><a:off x="0" y="0"/><a:ext cx="' + cx + '" cy="' + cy + '"/>' +
+      '<a:chOff x="0" y="0"/><a:chExt cx="' + cx + '" cy="' + cy + '"/></a:xfrm>' +
+      '</wpg:grpSpPr>' + ctx.shapes.join('') + '</wpg:wgp>' +
+      '</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
+  }
+
+
   /**
    * 組一份 .docx。
    *   opts.svg    整份 SVG 字串（已經含標題與來源標註）
@@ -939,14 +1329,10 @@
     var scale = Math.min(1, pageW / w);
     var cx = Math.round(w * scale * EMU), cy = Math.round(h * scale * EMU);
 
-    var docXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
-      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
-      'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" ' +
-      'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
-      'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
-      '<w:body>' +
-      '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing>' +
+    /* 先試著整張換成 Word 自己的圖案（打開就能改字）。
+       範本庫那種任意 SVG 換不了，才退回「圖片＋SVG」那條老路。 */
+    var group = svgToWordGroup(o.svg, { scale: scale, title: title });
+    var picture = '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing>' +
       '<wp:inline distT="0" distB="0" distL="0" distR="0">' +
       '<wp:extent cx="' + cx + '" cy="' + cy + '"/>' +
       '<wp:docPr id="1" name="' + escapeXml(title) + '" descr="' + escapeXml(title) + '"/>' +
@@ -958,13 +1344,28 @@
       '</a:ext></a:extLst></a:blip><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' +
       '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + cx + '" cy="' + cy + '"/></a:xfrm>' +
       '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>' +
-      '</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>' +
-      /* 使用者一打開就看得到怎麼把圖變成可編輯的——不然沒人知道有這個功能 */
+      '</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
+
+    /* 一打開就講得出這張圖能怎麼動——不然沒人知道 */
+    var note = group
+      ? '圖上的每一個方塊、每一行字都是 Word 圖案：直接點就能拖、能改字、能換顏色。'
+      : '要修改圖上的方塊或文字：在圖片上按右鍵 →「轉換成圖形」（Word 2016 以上）。' +
+        '註：Word 轉換時可能會把圖上的文字轉丟，那時候請改用 SVG 或 PNG。';
+
+    var docXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
+      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
+      'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" ' +
+      'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
+      'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" ' +
+      'xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" ' +
+      'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
+      '<w:body>' +
+      (group || picture) +
       '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>' +
       '<w:rFonts w:ascii="DFKai-SB" w:eastAsia="標楷體" w:hAnsi="DFKai-SB"/>' +
       '<w:sz w:val="18"/><w:color w:val="7F7F7F"/></w:rPr>' +
-      '<w:t xml:space="preserve">要修改圖上的方塊或文字：在圖片上按右鍵 →「轉換成圖形」' +
-      '（Word 2016 以上），圖就會變成可以拖、可以改字的 Word 圖案。</w:t></w:r></w:p>' +
+      '<w:t xml:space="preserve">' + escapeXml(note) + '</w:t></w:r></w:p>' +
       '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>' +
       '<w:rFonts w:ascii="DFKai-SB" w:eastAsia="標楷體" w:hAnsi="DFKai-SB"/>' +
       '<w:sz w:val="16"/><w:color w:val="A6A6A6"/></w:rPr>' +
@@ -974,10 +1375,12 @@
       'w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>' +
       '</w:body></w:document>';
 
+    /* 換成圖案時就沒有圖片了；關聯裡留著指不到的檔案，Word 會說檔案毀損 */
     var rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>' +
-      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.svg"/>' +
+      (group ? '' :
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>' +
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.svg"/>') +
       '</Relationships>';
 
     var rootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
@@ -995,14 +1398,17 @@
       '</Types>';
 
     var png = o.png && o.png.length ? o.png : new Uint8Array(0);
-    return zipStore([
+    var parts = [
       { name: '[Content_Types].xml', bytes: utf8Bytes(contentTypes) },
       { name: '_rels/.rels', bytes: utf8Bytes(rootRels) },
       { name: 'word/document.xml', bytes: utf8Bytes(docXml) },
-      { name: 'word/_rels/document.xml.rels', bytes: utf8Bytes(rels) },
-      { name: 'word/media/image1.png', bytes: png },
-      { name: 'word/media/image1.svg', bytes: utf8Bytes(svgFile(String(o.svg || ''))) }
-    ]);
+      { name: 'word/_rels/document.xml.rels', bytes: utf8Bytes(rels) }
+    ];
+    if (!group) {
+      parts.push({ name: 'word/media/image1.png', bytes: png });
+      parts.push({ name: 'word/media/image1.svg', bytes: utf8Bytes(svgFile(String(o.svg || ''))) });
+    }
+    return zipStore(parts);
   }
 
   /** 組一份自足的 HTML：零外部請求，用瀏覽器列印就能出 PDF。 */
@@ -1424,7 +1830,7 @@
     parseViewBox: parseViewBox, textUnits: textUnits, wrapLabel: wrapLabel, shrinkToFit: shrinkToFit,
     setSvgAttrs: setSvgAttrs, composeExportSvg: composeExportSvg, svgFile: svgFile,
     buildStandaloneHtml: buildStandaloneHtml, safeFilename: safeFilename,
-    crc32: crc32, zipStore: zipStore, buildDocx: buildDocx,
+    crc32: crc32, zipStore: zipStore, buildDocx: buildDocx, svgToWordGroup: svgToWordGroup, wordShapesOk: wordShapesOk,
     FLOW: FLOW,
     splitFlowText: splitFlowText, flowOpposite: flowOpposite,
     layoutFlow: layoutFlow, flowMainIndexes: flowMainIndexes, renderFlowSvg: renderFlowSvg,

@@ -388,7 +388,7 @@
     }, {
       flow: true,
       keepTitle: true,
-      genHeading: '自己做一張' + gen.name,
+      genHeading: gen.name,
       genUse: gen.use + '　版面由程式排，你只要把內容填對。'
     });
   }

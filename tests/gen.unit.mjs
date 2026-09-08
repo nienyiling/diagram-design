@@ -741,6 +741,19 @@ await t('家系圖：分居畫一撇、離婚畫兩撇（這是最要緊的一�
   assert.equal(marks('divorced') - base, 2, '離婚不是兩撇');
 });
 
+await t('家系圖：同性伴侶照樣畫得出來，順序照填的（沒有男左女右可套）', () => {
+  const svg = genoSvg([P('甲', { sex: 'm' }), P('乙', { sex: 'm' }),
+    { kind: 'union', a: '甲', b: '乙', union: 'married', year: '108' },
+    { kind: 'bond', ba: '甲', bb: '乙', bond: 'close' }]);
+  assert.ok(genoCx(svg, '甲') < genoCx(svg, '乙'), '同性伴侶被重排了，應該照填的順序');
+  assert.ok(words(svg).includes('結婚 108'), '同性伴侶的婚姻狀態沒有標出來');
+  assert.ok(svg.includes('<polyline'), '同性伴侶的情感關係沒有畫出來');
+  /* 女女也一樣 */
+  const ff = genoSvg([P('丙', { sex: 'f' }), P('丁', { sex: 'f' }),
+    { kind: 'union', a: '丙', b: '丁', union: 'cohabit' }]);
+  assert.ok(genoCx(ff, '丙') < genoCx(ff, '丁'), '女女伴侶被重排了');
+});
+
 await t('家系圖：同居畫虛線，結婚畫實線', () => {
   const co = genoSvg([P('甲'), P('乙', { sex: 'f' }),
     { kind: 'union', a: '甲', b: '乙', union: 'cohabit' }]);
@@ -871,7 +884,7 @@ await t('家系圖：範例是一個看得懂的保護性個案（三代、有�
   const out = geno.build(geno.example, {}, {});
   assert.deepEqual(out.warnings, []);
   const text = words(out.svg);
-  ['陳大明', '林秀英', '陳志明', '王淑芬', '陳小華', '陳小強', '陳麗華']
+  ['祖父', '祖母', '父', '母', '案主', '弟', '姑姑']
     .forEach((n) => assert.ok(text.includes(n), '範例裡少了「' + n + '」'));
   assert.ok(text.includes('分居 85'), '沒有標出分居');
   assert.ok(text.includes('衝突') && text.includes('斷絕往來'), '圖例少了情感關係');

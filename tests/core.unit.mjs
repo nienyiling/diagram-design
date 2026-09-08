@@ -751,20 +751,86 @@ await t('zipStore：同樣的內容壓出同樣的位元組（時間固定成 19
   assert.deepEqual(Array.from(a), Array.from(b));
 });
 
-await t('buildDocx：該有的六個檔案都在，而且關聯指得到', () => {
-  const bytes = DD.buildDocx({ svg: '<svg viewBox="0 0 100 50"></svg>', png: new Uint8Array([1, 2, 3]), w: 100, h: 50, title: '測試圖' });
+/* Word 自己的「轉換成圖形」會把圖上的文字整批丟掉（實測 Word 2019：一張家系圖
+   68 個圖形進去、51 個圖案出來、32 段文字一個都沒留）。所以這一段測的是
+   「我們自己換成 Word 圖案時，字有沒有跟著進去」——那正是 Word 會弄丟的東西。 */
+
+const wordSvg = '<svg viewBox="0 0 200 100">' +
+  '<rect x="10" y="20" width="60" height="30" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>' +
+  '<circle cx="150" cy="35" r="15" fill="#ffffff" stroke="#2d3142" stroke-width="1.4"/>' +
+  '<line x1="70" y1="35" x2="135" y2="35" stroke="#2d3142" stroke-width="1.3"/>' +
+  '<polyline points="10,80 60,90 110,80" fill="none" stroke="#eb6c36" stroke-width="1.2"/>' +
+  '<path d="M 10 60 H 60 V 70" fill="none" stroke="#4f5d75" stroke-width="1.2" stroke-dasharray="6 4"/>' +
+  '<text x="40" y="40" fill="#2d3142" font-size="12" font-family="標楷體, DFKai-SB, serif" ' +
+  'font-weight="600" text-anchor="middle">陳小華</text></svg>';
+
+await t('svgToWordGroup：自己畫的圖換得成 Word 圖案，而且每一段字都在', () => {
+  const g = DD.svgToWordGroup(wordSvg, { scale: 1, title: '測試圖' });
+  assert.ok(g, '換不出來');
+  assert.equal((g.match(/<wps:wsp>/g) || []).length, 6, '圖案數不對');
+  assert.equal((g.match(/<wps:txbx>/g) || []).length, 1, '文字沒有變成文字方塊');
+  assert.ok(g.includes('陳小華'), '字掉了——那正是 Word 自己轉會出的錯');
+  assert.ok(g.includes('w:eastAsia="標楷體"'), '中文字型沒帶進去');
+  assert.ok(/<a:prstGeom prst="roundRect"/.test(g), '圓角方塊不見了');
+  assert.ok(/<a:prstGeom prst="ellipse"/.test(g), '圓不見了');
+  assert.ok(/<a:prstGeom prst="line"/.test(g), '直線不見了');
+  assert.equal((g.match(/<a:custGeom>/g) || []).length, 2, '折線與 path 沒有變成自訂形狀');
+  assert.ok(g.includes('<a:prstDash val="dash"/>'), '虛線沒有帶過去');
+});
+
+await t('svgToWordGroup：座標跟原圖對得上（x1/y1 這種帶數字的屬性最容易漏讀）', () => {
+  const g = DD.svgToWordGroup(wordSvg, { scale: 1, title: 'x' });
+  const EMU = 9525;
+  /* 直線 70,35 → 135,35：左上角在 (70,35)，寬 65、高 0 */
+  const m = /<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"\/><\/a:xfrm><a:prstGeom prst="line"/.exec(g);
+  assert.ok(m, '找不到那條直線');
+  assert.equal(+m[1], 70 * EMU, '線的起點 x 不對（屬性名字讀錯會變成 0）');
+  assert.equal(+m[2], 35 * EMU);
+  assert.equal(+m[3], 65 * EMU, '線的長度不對');
+  assert.equal(+m[4], 0);
+  /* 圓 cx=150 r=15：外框左上角在 (135,20)、寬高各 30 */
+  const c = /<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"\/><\/a:xfrm><a:prstGeom prst="ellipse"/.exec(g);
+  assert.equal(+c[1], 135 * EMU);
+  assert.equal(+c[3], 30 * EMU);
+});
+
+await t('svgToWordGroup：字級換算成半點，縮圖時字也跟著縮', () => {
+  const big = DD.svgToWordGroup(wordSvg, { scale: 1, title: 'x' });
+  const half = DD.svgToWordGroup(wordSvg, { scale: 0.5, title: 'x' });
+  assert.equal(+/<w:sz w:val="(\d+)"\/>/.exec(big)[1], 18, '12px 應該是 9pt＝18 半點');
+  assert.equal(+/<w:sz w:val="(\d+)"\/>/.exec(half)[1], 9, '縮一半字沒有跟著縮');
+});
+
+await t('svgToWordGroup：認不得的 SVG 一律回 null，不要猜著轉', () => {
+  assert.equal(DD.svgToWordGroup('<svg viewBox="0 0 10 10"><g><rect width="5" height="5" fill="#fff"/></g></svg>', {}), null, '有 g 還硬轉');
+  assert.equal(DD.svgToWordGroup('<svg viewBox="0 0 10 10"><style>.a{fill:red}</style><rect class="a" width="5" height="5"/></svg>', {}), null, '有 style 還硬轉');
+  assert.equal(DD.svgToWordGroup('<svg><rect width="5" height="5" fill="#fff"/></svg>', {}), null, '沒有 viewBox 還硬轉');
+  assert.equal(DD.svgToWordGroup('<svg viewBox="0 0 10 10"></svg>', {}), null, '空的圖不該產出空群組');
+  assert.equal(DD.wordShapesOk(wordSvg), true);
+  assert.equal(DD.wordShapesOk('<svg viewBox="0 0 10 10"><g/></svg>'), false);
+});
+
+await t('buildDocx：換得成圖案時不放圖片，關聯裡也不留指不到的檔案', () => {
+  const bytes = DD.buildDocx({ svg: wordSvg, png: new Uint8Array([1, 2, 3]), w: 200, h: 100, title: '測試圖' });
+  const text = Buffer.from(bytes).toString('utf8');
+  assert.ok(text.includes('<wpg:wgp>'), '沒有用 Word 圖案群組');
+  assert.ok(text.includes('陳小華'), '字沒有進 Word 檔');
+  assert.ok(!text.includes('word/media/image1.png'), '不用的圖片還留著');
+  assert.ok(!text.includes('media/image1.svg'), '關聯指到不存在的檔案，Word 會說檔案毀損');
+  assert.ok(!text.includes('轉換成圖形'), '已經是圖案了還叫人去轉換');
+});
+
+await t('buildDocx：範本那種認不得的 SVG 退回圖片，六個檔案都在', () => {
+  const tpl = '<svg viewBox="0 0 100 50"><g><text>甲</text></g></svg>';
+  const bytes = DD.buildDocx({ svg: tpl, png: new Uint8Array([1, 2, 3]), w: 100, h: 50, title: '測試圖' });
   const text = Buffer.from(bytes).toString('latin1');
   ['[Content_Types].xml', '_rels/.rels', 'word/document.xml',
     'word/_rels/document.xml.rels', 'word/media/image1.png', 'word/media/image1.svg']
     .forEach((n) => assert.ok(text.includes(n), '少了 ' + n));
-});
-
-await t('buildDocx：圖是以 SVG 放進去的（Word 才轉得成可編輯的圖案）', () => {
-  const bytes = DD.buildDocx({ svg: '<svg viewBox="0 0 100 50"><text>甲</text></svg>', png: new Uint8Array(0), w: 100, h: 50 });
-  const text = Buffer.from(bytes).toString('utf8');
-  assert.ok(text.includes('asvg:svgBlip'), '沒有 SVG 擴充，Word 只會看到圖片');
-  assert.ok(text.includes('r:embed="rId2"'), 'SVG 沒有掛上關聯');
-  assert.ok(text.includes('轉換成圖形'), '沒有告訴使用者怎麼把圖變成可編輯的');
+  const utf = Buffer.from(bytes).toString('utf8');
+  assert.ok(utf.includes('asvg:svgBlip'), '沒有 SVG 擴充，Word 只會看到圖片');
+  assert.ok(utf.includes('r:embed="rId2"'), 'SVG 沒有掛上關聯');
+  assert.ok(utf.includes('轉換成圖形'), '沒有告訴使用者怎麼把圖變成可編輯的');
 });
 
 await t('buildDocx：帶著來源標註（授權要求）', () => {

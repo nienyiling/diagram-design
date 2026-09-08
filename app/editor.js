@@ -296,24 +296,29 @@
   }
 
   /**
-   * .docx：Word 開得起來，而且圖是 SVG——使用者在 Word 裡按右鍵「轉換成圖形」
-   * 就能把整張圖變成可以拖、可以改字的 Word 圖案。這才是「可編輯的 Word」。
-   * 同時放一份 PNG 當後備，舊版 Word 與 LibreOffice 看不懂 SVG 時才不會開出一個空白框。
+   * .docx：自己填表產生的圖，整張會換成 Word 原生圖案——打開就能拖、就能改字，
+   * 不必按右鍵「轉換成圖形」（實測 Word 2019 那一步會把圖上的文字整批轉丟）。
+   * 範本庫那 153 張是別人寫的任意 SVG，換不了，仍走「圖片＋SVG＋PNG 後備」那條路。
    */
   function saveDocx() {
     show(el.dlErr, '');
     show(el.edOk, '');
     var svg = composed();
     var box = DD.parseViewBox(svg) || { w: state.d.w, h: state.d.h };
-    makePng().then(function (r) {
-      return r.blob.arrayBuffer().then(function (buf) {
-        return { png: new Uint8Array(buf), w: r.w, h: r.h };
+    var shapes = DD.wordShapesOk(svg);
+    /* 換得成 Word 圖案時就用不到後備圖片，畫 canvas、等 blob 那一整步也省下來 */
+    var step = shapes
+      ? Promise.resolve({ png: new Uint8Array(0), w: 0, h: 0 })
+      : makePng().then(function (r) {
+        return r.blob.arrayBuffer().then(function (buf) {
+          return { png: new Uint8Array(buf), w: r.w, h: r.h };
+        });
+      }).catch(function () {
+        /* 這張圖轉不出 PNG（例如用到 foreignObject）也還是要給得出 .docx，
+           只是舊版 Word 會看到空白——總比按了沒反應好 */
+        return { png: new Uint8Array(0), w: 0, h: 0 };
       });
-    }).catch(function () {
-      /* 這張圖轉不出 PNG（例如用到 foreignObject）也還是要給得出 .docx，
-         只是舊版 Word 會看到空白——總比按了沒反應好 */
-      return { png: new Uint8Array(0), w: 0, h: 0 };
-    }).then(function (r) {
+    step.then(function (r) {
       var bytes = DD.buildDocx({
         svg: svg, png: r.png, w: box.w, h: box.h,
         title: el.edTitleIn.value.trim() || state.d.typeZh || '圖表'
@@ -321,9 +326,11 @@
       download(new Blob([bytes], {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       }), DD.safeFilename(baseName(), 'docx'));
-      show(el.edOk, r.png.length
-        ? '已下載 Word 檔。在 Word 裡對圖按右鍵 →「轉換成圖形」，就能拖方塊、改文字。'
-        : '已下載 Word 檔（這張圖轉不出後備圖片，Word 2016 以下可能看不到圖，請改用 SVG）。');
+      show(el.edOk, shapes
+        ? '已下載 Word 檔。圖上的方塊與文字都是 Word 圖案，打開就能拖、能改字，不必再按「轉換成圖形」。'
+        : (r.png.length
+          ? '已下載 Word 檔。這張是範本圖，只能以圖片放進去；要改字請在 Word 裡按右鍵 →「轉換成圖形」（Word 有可能把圖上的文字轉丟，那時請改用 SVG）。'
+          : '已下載 Word 檔（這張圖轉不出後備圖片，Word 2016 以下可能看不到圖，請改用 SVG）。'));
     }).catch(function (e) {
       show(el.dlErr, '產生 Word 檔時出錯（' + e.message + '），請改用 SVG 或 PNG 下載。');
     });
@@ -577,7 +584,7 @@
 
     el.edKind.textContent = diagram.typeZh + '　' + diagram.variantZh;
     el.edHeading.textContent = state.flow
-      ? (o.genHeading || '自己做一張圖')
+      ? (o.genHeading || '圖表')
       : (diagram.heading || diagram.title || diagram.typeZh);
     el.edUse.textContent = state.flow
       ? (o.genUse || '版面由程式排，你只要把內容填對。')

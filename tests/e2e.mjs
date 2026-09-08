@@ -857,11 +857,15 @@ await t('載入壞掉的設定檔時，錯誤訊息看得見而且講人話', as
 
 /* ── Word：圖要能在 Word 裡再編輯 ─────────────────────────────────── */
 
-await t('下載 Word 檔：是個 zip、裡面的圖是 SVG（Word 才轉得成圖案）', async () => {
+await t('下載 Word 檔：整張圖是 Word 圖案，圖上的字一段都不能少', async () => {
   await page.goto(server.url + '#/make/org', { waitUntil: 'networkidle' });
   await page.locator('#stage svg').waitFor({ timeout: 5000 });
   await page.locator('#edTitleIn').fill('Org 2026');
   await page.waitForTimeout(400);
+  /* 圖上有幾段字，Word 檔裡就要有幾個文字方塊——Word 自己的「轉換成圖形」
+     就是在這一步把字整批弄丟的（實測 2019：32 段字全沒了） */
+  const words = await page.evaluate(() =>
+    [...document.querySelectorAll('#stage svg text')].map((n) => n.textContent).filter(Boolean));
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 20000 }),
     page.locator('#dlDocx').click()
@@ -870,12 +874,16 @@ await t('下載 Word 檔：是個 zip、裡面的圖是 SVG（Word 才轉得成�
   const buf = fs.readFileSync(await download.path());
   assert.equal(buf[0], 0x50, '不是 zip');
   assert.equal(buf[1], 0x4b, '不是 zip');
-  const text = buf.toString('latin1');
-  ['word/document.xml', 'word/media/image1.svg', 'word/media/image1.png']
-    .forEach((n) => assert.ok(text.includes(n), '.docx 裡少了 ' + n));
-  assert.ok(buf.toString('utf8').includes('asvg:svgBlip'), '圖不是以 SVG 放進去的');
-  assert.ok((await page.locator('#edOk').innerText()).includes('轉換成圖形'),
-    '沒有告訴使用者怎麼把圖變成可編輯的');
+  const utf = buf.toString('utf8');
+  assert.ok(utf.includes('<wpg:wgp>'), '圖沒有變成 Word 圖案群組');
+  assert.ok(words.length > 3, '這張圖上本來就沒幾個字，測不到東西');
+  /* 下載的那份還多了標題與來源標註，所以是「不少於」；重點是一段都不能掉 */
+  assert.ok((utf.match(/<wps:txbx>/g) || []).length >= words.length,
+    '文字方塊比圖上的字還少，掉字了');
+  words.forEach((w) => assert.ok(utf.includes(w), '.docx 裡少了「' + w + '」'));
+  assert.ok(!buf.toString('latin1').includes('word/media/'), '已經是圖案了還塞圖片進去');
+  assert.ok((await page.locator('#edOk').innerText()).includes('不必再按'),
+    '沒有告訴使用者這張圖打開就能改');
 });
 
 /* ── 版面：預覽要跟著看得到，手機上一列要是一張卡 ─────────────────── */
@@ -966,7 +974,7 @@ await t('家系圖打得開，一列可以是成員／伴侶關係／情感關�
   const kinds = await page.locator('#f_genogram_0_kind option').allInnerTexts();
   assert.deepEqual(kinds, ['成員', '伴侶關係', '情感關係']);
   const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
-  ['陳大明', '陳小華', '分居 85'].forEach((w) =>
+  ['祖父', '姑姑', '分居 85'].forEach((w) =>
     assert.ok(svgText.includes(w), '範例的圖上少了「' + w + '」：' + svgText.slice(0, 120)));
 });
 
@@ -989,15 +997,15 @@ await t('家系圖：「父親」的下拉只列前面已經填過的成員', as
   await page.locator('#makeExampleBtn').click();
   await page.waitForTimeout(400);
   const opts = await page.locator('#f_genogram_5_father option').allInnerTexts();
-  assert.ok(opts.includes('陳志明'), opts.join('／'));
-  assert.ok(!opts.includes('陳小強'), '後面才填的成員不該出現在父親欄：' + opts.join('／'));
+  assert.ok(opts.includes('父'), opts.join('／'));
+  assert.ok(!opts.includes('弟'), '後面才填的成員不該出現在父親欄：' + opts.join('／'));
 });
 
 await t('家系圖：改一個人的名字，圖上跟著改', async () => {
-  await page.locator('#f_genogram_5_name').fill('陳小美');
+  await page.locator('#f_genogram_5_name').fill('小美');
   await page.waitForTimeout(500);
   const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
-  assert.ok(svgText.includes('陳小美'), svgText.slice(0, 150));
+  assert.ok(svgText.includes('小美'), svgText.slice(0, 150));
 });
 
 await t('家系圖：勾「已歿」圖上就打叉，勾「案主」就變雙框', async () => {
@@ -1026,16 +1034,16 @@ await t('家系圖：勾「已歿」圖上就打叉，勾「案主」就變雙�
 await t('家系圖：父母指到後面的人時，錯誤訊息看得見而且說得出是誰', async () => {
   await page.locator('#makeExampleBtn').click();
   await page.waitForTimeout(400);
-  /* 把第 1 列（陳大明）的父親改成後面才出現的人 */
+  /* 把第 1 列（祖父）的父親改成後面才出現的人 */
   await page.evaluate(() => {
     const st = window.DDForms._state();
-    st.rows[0].father = '陳小華';
+    st.rows[0].father = '案主';
   });
-  await page.locator('#f_genogram_0_name').fill('陳大明 ');
+  await page.locator('#f_genogram_0_name').fill('祖父 ');
   await page.waitForTimeout(600);
   assert.equal(await page.locator('#makeErr').isVisible(), true, '錯誤訊息沒有顯示出來');
   const msg = await page.locator('#makeErr').innerText();
-  assert.ok(msg.includes('陳大明'), msg);
+  assert.ok(msg.includes('祖父'), msg);
   assert.ok(msg.includes('不在它前面'), msg);
 });
 
@@ -1059,7 +1067,7 @@ await t('家系圖也下載得出來，而且一樣帶著來源標註', async ()
   ]);
   const text = fs.readFileSync(await download.path(), 'utf8');
   assert.ok(text.includes('Case 2026'));
-  assert.ok(text.includes('陳小華'));
+  assert.ok(text.includes('姑姑'));
   assert.ok(text.includes('cathrynlavery/diagram-design'));
 });
 

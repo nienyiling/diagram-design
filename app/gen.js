@@ -1023,16 +1023,22 @@
     rowName: '列',
     help: [
       '一列可以是「成員」「伴侶關係」或「情感關係」，用最左邊的型別欄分。',
+      '後兩種不是人，只是把兩個「已經填過的成員」連起來，所以那兩種列沒有姓名、性別、年齡欄。',
       '成員只要填「父親是誰、母親是誰」，世代與手足位置由程式算，不必自己排。',
       '父母只能選前面已經填過的成員，所以由上而下（祖父母 → 父母 → 子女）填最順。',
-      '符號照慣例：男□、女○、性別不明◇、案主雙框、已歿打叉；伴侶男左女右。',
+      '符號照慣例：男□、女○、性別不明◇、案主雙框、已歿打叉；一男一女的伴侶男左女右。',
+      '同性伴侶照樣畫得出來：符號各依各自的性別，位置照你填的順序（沒有男左女右可套）。',
       '再婚只要多填一列伴侶關係：結過兩次的那一位會自動排到中間，前一段在左、後面的在右。',
       '情感關係是另外一層，用強調色畫在成員之間（親近雙線、衝突鋸齒、斷絕兩撇）。'
     ],
     fields: [
-      { key: 'kind', label: '型別', type: 'select', options: GENO_KIND_OPTIONS, width: '104px' },
+      /* 124px：104 的話「伴侶關係」四個字會被下拉箭頭壓到 */
+      { key: 'kind', label: '型別', type: 'select', options: GENO_KIND_OPTIONS, width: '124px' },
 
-      { key: 'name', label: '姓名／稱謂', type: 'text', placeholder: '陳小華' },
+      /* 姓名只有「成員」那種列才有意義。不加 only 的話，伴侶關係那一列上面會杵著一個
+         填了也不會怎樣的姓名欄，整列看起來就像「一個沒有年齡的人」——使用者第一個問的就是這個。
+         （而且填進去的字會跑進後面幾列的下拉選單裡，變成一個根本不存在的成員。） */
+      { key: 'name', label: '姓名／稱謂', type: 'text', placeholder: '案主', only: 'person' },
       { key: 'sex', label: '性別', type: 'select', options: SEX_OPTIONS, width: '88px', only: 'person' },
       { key: 'age', label: '年齡', type: 'text', placeholder: '16', width: '84px', only: 'person' },
       { key: 'father', label: '父親', type: 'rowref', width: '150px', only: 'person' },
@@ -1044,29 +1050,32 @@
       { key: 'dead', label: '已歿', type: 'check', width: '72px', only: 'person',
         hint: '已歿的成員符號上會打一個叉' },
 
-      { key: 'a', label: '這一位', type: 'rowref', width: '160px', only: 'union' },
-      { key: 'b', label: '與這一位', type: 'rowref', width: '160px', only: 'union' },
-      { key: 'union', label: '關係', type: 'select', options: UNION_OPTIONS, width: '116px', only: 'union' },
+      /* 標題要看得出「這一列是把兩個已經填過的人連起來」，不是在新增一個人 */
+      { key: 'a', label: '伴侶', type: 'rowref', width: '160px', only: 'union' },
+      { key: 'b', label: '和哪一位', type: 'rowref', width: '160px', only: 'union' },
+      { key: 'union', label: '狀態', type: 'select', options: UNION_OPTIONS, width: '116px', only: 'union' },
       { key: 'year', label: '年份（可留空）', type: 'text', placeholder: '85', width: '128px', only: 'union' },
 
-      { key: 'ba', label: '這一位', type: 'rowref', width: '160px', only: 'bond' },
-      { key: 'bb', label: '與這一位', type: 'rowref', width: '160px', only: 'bond' },
+      { key: 'ba', label: '成員', type: 'rowref', width: '160px', only: 'bond' },
+      { key: 'bb', label: '和哪一位', type: 'rowref', width: '160px', only: 'bond' },
       { key: 'bond', label: '情感關係', type: 'select', options: BOND_OPTIONS, width: '134px', only: 'bond' }
     ],
+    /* 範例用稱謂不用姓名：家系圖看的是關係，寫「父」「案主」一眼就懂是誰對誰，
+       寫「陳志明」還要先回頭對一次那是誰。真的要寫姓名也填得下去。 */
     example: [
-      { kind: 'person', name: '陳大明', sex: 'm', age: '78', dead: true, note: '肝癌過世' },
-      { kind: 'person', name: '林秀英', sex: 'f', age: '75', note: '獨居' },
-      { kind: 'person', name: '陳志明', sex: 'm', age: '52', father: '陳大明', mother: '林秀英', note: '長期失業' },
-      { kind: 'person', name: '陳麗華', sex: 'f', age: '49', father: '陳大明', mother: '林秀英', note: '定居國外' },
-      { kind: 'person', name: '王淑芬', sex: 'f', age: '48', note: '早餐店打工' },
-      { kind: 'person', name: '陳小華', sex: 'f', age: '16', father: '陳志明', mother: '王淑芬', index: true, note: '國中三年級' },
-      { kind: 'person', name: '陳小強', sex: 'm', age: '12', father: '陳志明', mother: '王淑芬', note: '國小六年級' },
-      { kind: 'union', name: '', a: '陳大明', b: '林秀英', union: 'married', year: '55' },
-      { kind: 'union', name: '', a: '陳志明', b: '王淑芬', union: 'separated', year: '85' },
-      { kind: 'bond', name: '', ba: '陳志明', bb: '陳小華', bond: 'conflict' },
-      { kind: 'bond', name: '', ba: '王淑芬', bb: '陳小華', bond: 'close' },
-      { kind: 'bond', name: '', ba: '林秀英', bb: '陳小華', bond: 'fused' },
-      { kind: 'bond', name: '', ba: '陳大明', bb: '陳麗華', bond: 'cutoff' }
+      { kind: 'person', name: '祖父', sex: 'm', age: '78', dead: true, note: '肝癌過世' },
+      { kind: 'person', name: '祖母', sex: 'f', age: '75', note: '獨居' },
+      { kind: 'person', name: '父', sex: 'm', age: '52', father: '祖父', mother: '祖母', note: '長期失業' },
+      { kind: 'person', name: '姑姑', sex: 'f', age: '49', father: '祖父', mother: '祖母', note: '定居國外' },
+      { kind: 'person', name: '母', sex: 'f', age: '48', note: '早餐店打工' },
+      { kind: 'person', name: '案主', sex: 'f', age: '16', father: '父', mother: '母', index: true, note: '國中三年級' },
+      { kind: 'person', name: '弟', sex: 'm', age: '12', father: '父', mother: '母', note: '國小六年級' },
+      { kind: 'union', name: '', a: '祖父', b: '祖母', union: 'married', year: '55' },
+      { kind: 'union', name: '', a: '父', b: '母', union: 'separated', year: '85' },
+      { kind: 'bond', name: '', ba: '父', bb: '案主', bond: 'conflict' },
+      { kind: 'bond', name: '', ba: '母', bb: '案主', bond: 'close' },
+      { kind: 'bond', name: '', ba: '祖母', bb: '案主', bond: 'fused' },
+      { kind: 'bond', name: '', ba: '祖父', bb: '姑姑', bond: 'cutoff' }
     ],
     build: function (rows, meta, opts) {
       var warnings = [];
