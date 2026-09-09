@@ -79,7 +79,9 @@ await t('每一種的範例都畫得出來，沒有半句抱怨', () => {
 
 await t('範例填的每一格文字都真的出現在圖上', () => {
   G.TYPES.forEach((g) => {
-    const text = words(buildExample(g).svg);
+    /* 家系圖的姓名預設不畫在圖上（個案資料），這一項要把它打開才問得準 */
+    const meta = Object.assign(defMeta(g), g.id === 'genogram' ? { names: 'on' } : {});
+    const text = words(g.build(g.example, meta, {}).svg);
     g.example.forEach((row) => {
       g.fields.forEach((f) => {
         if (f.type !== 'text') return;
@@ -782,7 +784,9 @@ await t('關係圖：同一列的兩個方塊之間有字時，欄距要讓得�
    所以這一段測的是「慣例有沒有守住」，不是版面好不好看。 */
 
 const geno = G.byId('genogram');
-const genoSvg = (rows) => geno.build(rows, {}, {}).svg;
+/* 版面相關的斷言要靠姓名定位，所以測試一律把姓名打開；
+   「預設不顯示」本身另外有一項專測。 */
+const genoSvg = (rows, meta) => geno.build(rows, Object.assign({ names: 'on' }, meta || {}), {}).svg;
 const P = (name, extra) => Object.assign({ kind: 'person', name, sex: 'm' }, extra || {});
 /** 圖例本身也會畫一次符號與關係線，數東西時要先把它切掉，不然會多算一份。 */
 const genoBody = (svg) => svg.slice(0, svg.indexOf('>圖例<') >= 0 ? svg.lastIndexOf('<line', svg.indexOf('>圖例<')) : svg.length);
@@ -801,11 +805,58 @@ await t('家系圖：男是方形、女是圓形、性別不明是菱形', () =>
   assert.ok(/<polygon/.test(genoSvg([P('丙', { sex: 'u' })])), '性別不明不是菱形');
 });
 
-await t('家系圖：案主畫成雙框（而且用強調色，一眼看得到）', () => {
-  const boxes = (rows) => (genoBody(genoSvg(rows))
-    .match(new RegExp('<rect[^>]*stroke="' + DD.UPSTREAM_LIGHT.accent + '"', 'g')) || []).length;
-  assert.equal(boxes([P('甲')]), 0, '沒標案主卻用了強調色');
-  assert.equal(boxes([P('甲', { index: true })]), 2, '案主沒有畫成雙框');
+await t('家系圖：案主填深色加雙框（社工實務上就是這樣標，一眼看得到）', () => {
+  const plain = genoBody(genoSvg([P('甲')]));
+  const idx = genoBody(genoSvg([P('甲', { index: true })]));
+  const accent = (svg) => (svg.match(new RegExp('<rect[^>]*stroke="' +
+    DD.UPSTREAM_LIGHT.accent + '"', 'g')) || []).length;
+  assert.equal(accent(plain), 0, '沒標案主卻用了強調色');
+  assert.equal(accent(idx), 1, '案主的外框沒有用強調色');
+  /* 外框填深色、裡面再一圈紙色的內框 */
+  assert.ok(new RegExp('<rect[^>]*fill="' + DD.UPSTREAM_LIGHT.ink + '"[^>]*stroke="' +
+    DD.UPSTREAM_LIGHT.accent + '"').test(idx), '案主沒有填深色');
+  assert.ok(new RegExp('<rect[^>]*stroke="' + DD.UPSTREAM_LIGHT.paper + '"').test(idx),
+    '深色底上少了看得見的內框');
+  assert.ok(!new RegExp('<rect[^>]*fill="' + DD.UPSTREAM_LIGHT.ink + '"').test(plain),
+    '沒標案主的人不該被填深色');
+});
+
+await t('家系圖：案主身上的字與叉要改成紙色，不然深色底上看不見', () => {
+  const svg = genoBody(genoSvg([P('甲', { index: true, age: '16', dead: true })]));
+  const paper = DD.UPSTREAM_LIGHT.paper;
+  assert.ok(new RegExp('<text[^>]*fill="' + paper + '"[^>]*>16<').test(svg), '年齡看不見');
+  assert.equal((svg.match(new RegExp('<line[^>]*stroke="' + paper + '"', 'g')) || []).length, 2,
+    '已歿的叉沒有改成紙色');
+});
+
+await t('家系圖：姓名／稱謂預設不畫在圖上，改了設定才畫', () => {
+  const rows = [P('陳小華', { age: '16' })];
+  const off = geno.build(rows, {}, {}).svg;
+  const on = geno.build(rows, { names: 'on' }, {}).svg;
+  assert.ok(!words(off).includes('陳小華'), '預設就把個案的姓名畫上去了');
+  assert.ok(words(off).includes('16'), '年齡不該跟著不見');
+  assert.ok(words(on).includes('陳小華'), '設定改成顯示卻還是不畫');
+});
+
+await t('家系圖：學歷是選填的，填了才畫、亂填當成不填', () => {
+  assert.ok(words(genoSvg([P('甲', { edu: '高中職' })])).includes('高中職'), '學歷沒畫出來');
+  assert.ok(!words(genoSvg([P('甲')])).includes('高中職'));
+  /* 上一版的設定檔可能存著別的字，照規格驗過就好，不要把它畫上去 */
+  const odd = words(genoSvg([P('甲', { edu: '博士後研究' })]));
+  assert.ok(!odd.includes('博士後研究'), '不在選項裡的學歷不該畫上去');
+});
+
+await t('家系圖：學歷排在姓名底下、註記上面', () => {
+  const y = (svg, str) => {
+    const before = svg.slice(0, svg.indexOf('>' + str + '<'));
+    const m = /<text x="[\d.]+" y="([\d.]+)"/g;
+    let last = null, r;
+    while ((r = m.exec(before))) last = r;
+    return +last[1];
+  };
+  const svg = genoSvg([P('甲', { edu: '大學', note: '獨居' })]);
+  assert.ok(y(svg, '大學') > y(svg, '甲'), '學歷沒排在姓名底下');
+  assert.ok(y(svg, '獨居') > y(svg, '大學'), '註記沒排在學歷底下');
 });
 
 await t('家系圖：已歿在符號上打一個叉', () => {
@@ -1043,7 +1094,7 @@ await t('家系圖：圖例只列這張圖真的用到的符號', () => {
 });
 
 await t('家系圖：範例是一個看得懂的保護性個案（三代、有案主、有衝突與斷絕）', () => {
-  const out = geno.build(geno.example, {}, {});
+  const out = geno.build(geno.example, { names: 'on' }, {});
   assert.deepEqual(out.warnings, []);
   const text = words(out.svg);
   ['祖父', '祖母', '父', '母', '案主', '弟', '姑姑']

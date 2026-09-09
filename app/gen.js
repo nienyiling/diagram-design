@@ -978,6 +978,24 @@
      用型別欄分。成員那一列填「父親是誰、母親是誰」，手足與世代由程式算——
      社工填的時候只要一個一個人往下加，不必自己想版面。 */
 
+  /* 學歷是選填的。社工的評估報告常常要標，但不是每一張家系圖都用得到，
+     所以第一個選項是「不填」，圖上就什麼都不畫。 */
+  var EDU_OPTIONS = [
+    { value: '', label: '不填' },
+    { value: '國小', label: '國小' },
+    { value: '國中', label: '國中' },
+    { value: '高中職', label: '高中職' },
+    { value: '專科', label: '專科' },
+    { value: '大學', label: '大學' },
+    { value: '碩士', label: '碩士' },
+    { value: '博士', label: '博士' },
+    { value: '不識字', label: '不識字' }
+  ];
+  var GENO_NAME_OPTIONS = [
+    { value: 'off', label: '不顯示（預設）' },
+    { value: 'on', label: '顯示' }
+  ];
+
   var GENO = {
     size: 46, gapX: 46, coupleGap: 96, genH: 150, top: 74, left: 46, right: 954
   };
@@ -1027,10 +1045,15 @@
     help: [
       '先填寫成員，填寫完畢後再選擇關係。',
       '父母只能選前面已經填過的成員，所以由上而下（祖父母 → 父母 → 子女）填最順。',
-      '符號：男□、女○、性別不明◇、案主雙框、已歿打叉；一男一女的伴侶男左女右。'
+      '符號：男□、女○、性別不明◇、案主填深色加雙框、已歿打叉；一男一女的伴侶男左女右。',
+      '姓名／稱謂預設不畫在圖上（個案資料），要顯示就改上面那個選項；學歷是選填的。'
     ],
     /* 一張表分兩段：成員填完才輪到關係。三種列全混在一條長表裡時，
        使用者看到的是「一列一列長得都不一樣」，第一個問的就是「這是什麼意思」。 */
+    meta: [
+      { key: 'names', label: '圖上顯示姓名／稱謂', type: 'select',
+        options: GENO_NAME_OPTIONS, width: '200px' }
+    ],
     groups: [
       { id: 'member', title: '成員', rowName: '成員', kinds: ['person'], add: '＋ 新增成員' },
       { id: 'link', title: '關係', rowName: '關係', kinds: ['union', 'bond'], add: '＋ 新增關係',
@@ -1049,6 +1072,7 @@
       { key: 'father', label: '父親', type: 'rowref', width: '150px', only: 'person' },
       { key: 'mother', label: '母親', type: 'rowref', width: '150px', only: 'person' },
       { key: 'childType', label: '與父母', type: 'select', options: CHILD_OPTIONS, width: '104px', only: 'person' },
+      { key: 'edu', label: '學歷（選填）', type: 'select', options: EDU_OPTIONS, width: '110px', only: 'person' },
       { key: 'note', label: '註記（可留空）', type: 'text', only: 'person' },
       { key: 'index', label: '案主', type: 'check', width: '72px', only: 'person',
         hint: '案主畫成雙框，一張圖標一個' },
@@ -1070,10 +1094,10 @@
     example: [
       { kind: 'person', name: '祖父', sex: 'm', age: '78', dead: true, note: '肝癌過世' },
       { kind: 'person', name: '祖母', sex: 'f', age: '75', note: '獨居' },
-      { kind: 'person', name: '父', sex: 'm', age: '52', father: '祖父', mother: '祖母', note: '長期失業' },
+      { kind: 'person', name: '父', sex: 'm', age: '52', father: '祖父', mother: '祖母', edu: '高中職', note: '長期失業' },
       { kind: 'person', name: '姑姑', sex: 'f', age: '49', father: '祖父', mother: '祖母', note: '定居國外' },
-      { kind: 'person', name: '母', sex: 'f', age: '48', note: '早餐店打工' },
-      { kind: 'person', name: '案主', sex: 'f', age: '16', father: '父', mother: '母', index: true, note: '國中三年級' },
+      { kind: 'person', name: '母', sex: 'f', age: '48', edu: '國中', note: '早餐店打工' },
+      { kind: 'person', name: '案主', sex: 'f', age: '16', father: '父', mother: '母', index: true, edu: '高中職', note: '國中三年級' },
       { kind: 'person', name: '弟', sex: 'm', age: '12', father: '父', mother: '母', note: '國小六年級' },
       { kind: 'union', name: '', a: '祖父', b: '祖母', union: 'married', year: '55' },
       { kind: 'union', name: '', a: '父', b: '母', union: 'separated', year: '85' },
@@ -1115,6 +1139,7 @@
             name: name, sex: (row.sex === 'f' || row.sex === 'u') ? row.sex : 'm',
             age: String(row.age || '').trim(), note: String(row.note || '').trim(),
             index: !!row.index, dead: !!row.dead,
+            edu: optValue(EDU_OPTIONS, row.edu),
             childType: optValue(CHILD_OPTIONS, row.childType),
             fatherName: String(row.father || '').trim(),
             motherName: String(row.mother || '').trim(),
@@ -1361,7 +1386,8 @@
       });
 
       /* 成員符號與伴侶標籤最後畫：它們都墊了紙色底，蓋在線上面才看得清楚 */
-      people.forEach(function (p) { out.push(personGlyph(p, sz, scale)); });
+      var showName = optValue(GENO_NAME_OPTIONS, meta && meta.names) === 'on';
+      people.forEach(function (p) { out.push(personGlyph(p, sz, scale, { showName: showName })); });
       out = out.concat(unionTags);
 
       out.push(genoLegend(H - 44, people, bonds));
@@ -1446,50 +1472,67 @@
   }
 
   /** 一個成員：男□女○不明◇，案主雙框，已歿打叉，年齡在裡面、姓名在下面。 */
-  function personGlyph(p, sz, scale) {
+  function personGlyph(p, sz, scale, opts) {
+    var o = opts || {};
     var out = [];
+    /* 案主填深色：社工實務上就是這樣標，比雙框更一眼看得到。雙框留著，
+       兩種慣例都在，印成黑白時也還分得出來。 */
     var stroke = p.index ? C.accent : C.ink;
-    out.push(sexShape(p, p.px, p.py, sz, stroke, 1.4));
-    if (p.index) out.push(sexShape(p, p.px + 4, p.py + 4, sz - 8, stroke, 1.1));
+    out.push(sexShape(p, p.px, p.py, sz, stroke, 1.4, p.index ? C.ink : '#ffffff'));
+    if (p.index) out.push(sexShape(p, p.px + 4, p.py + 4, sz - 8, C.paper, 1.1, 'none'));
+    /* 深色底上的線與字要改成紙色，不然整個看不見 */
+    var mark = p.index ? C.paper : C.ink;
     if (p.dead) {
       out.push('<line x1="' + r1(p.px + 3) + '" y1="' + r1(p.py + 3) + '" x2="' + r1(p.px + sz - 3) +
-        '" y2="' + r1(p.py + sz - 3) + '" stroke="' + C.ink + '" stroke-width="1.4"/>');
+        '" y2="' + r1(p.py + sz - 3) + '" stroke="' + mark + '" stroke-width="1.4"/>');
       out.push('<line x1="' + r1(p.px + sz - 3) + '" y1="' + r1(p.py + 3) + '" x2="' + r1(p.px + 3) +
-        '" y2="' + r1(p.py + sz - 3) + '" stroke="' + C.ink + '" stroke-width="1.4"/>');
+        '" y2="' + r1(p.py + sz - 3) + '" stroke="' + mark + '" stroke-width="1.4"/>');
     }
     var fs = Math.max(8, 12 * scale);
     if (p.age) {
       out.push(text(p.cx, p.cy + fs * 0.36, p.age,
-        { fill: C.ink, size: fs, weight: '600', anchor: 'middle', font: F.mono }));
+        { fill: mark, size: fs, weight: '600', anchor: 'middle', font: F.mono }));
     }
-    /* 姓名底下墊一塊紙色：情感關係線從旁邊經過時，才不會把名字劃掉 */
-    var nameFs = Math.max(9, 12.5 * scale);
-    out.push(paperBox(p.cx, p.py + sz + 15, p.name, nameFs));
-    out.push(text(p.cx, p.py + sz + 15, p.name,
-      { fill: C.ink, size: nameFs, weight: '600', anchor: 'middle' }));
+
+    /* 符號底下由上而下：姓名（可關）、學歷、註記。每一行都墊一塊紙色，
+       情感關係線從旁邊經過時才不會把字劃掉。 */
+    var ty = p.py + sz + 15;
+    if (o.showName) {
+      var nameFs = Math.max(9, 12.5 * scale);
+      out.push(paperBox(p.cx, ty, p.name, nameFs));
+      out.push(text(p.cx, ty, p.name,
+        { fill: C.ink, size: nameFs, weight: '600', anchor: 'middle' }));
+      ty += 14;
+    }
+    var nfs = Math.max(7.5, 8.5 * scale);
+    if (p.edu) {
+      out.push(paperBox(p.cx, ty, p.edu, nfs));
+      out.push(text(p.cx, ty, p.edu, { fill: C.muted, size: nfs, anchor: 'middle', font: F.mono }));
+      ty += 11;
+    }
     if (p.note) {
-      var nfs = Math.max(7.5, 8.5 * scale);
-      DD.wrapLabel(p.note, 12).slice(0, 2).forEach(function (ln, i) {
-        out.push(paperBox(p.cx, p.py + sz + 29 + i * 11, ln, nfs));
-        out.push(text(p.cx, p.py + sz + 29 + i * 11, ln,
-          { fill: C.muted, size: nfs, anchor: 'middle', font: F.mono }));
+      DD.wrapLabel(p.note, 12).slice(0, 2).forEach(function (ln) {
+        out.push(paperBox(p.cx, ty, ln, nfs));
+        out.push(text(p.cx, ty, ln, { fill: C.muted, size: nfs, anchor: 'middle', font: F.mono }));
+        ty += 11;
       });
     }
     return out.join('');
   }
 
-  function sexShape(p, x, y, sz, stroke, w) {
+  function sexShape(p, x, y, sz, stroke, w, fill) {
+    var bg = fill || '#ffffff';
     if (p.sex === 'f') {
       return '<circle cx="' + r1(x + sz / 2) + '" cy="' + r1(y + sz / 2) + '" r="' + r1(sz / 2) +
-        '" fill="#ffffff" stroke="' + stroke + '" stroke-width="' + w + '"/>';
+        '" fill="' + bg + '" stroke="' + stroke + '" stroke-width="' + w + '"/>';
     }
     if (p.sex === 'u') {
       return '<polygon points="' + r1(x + sz / 2) + ',' + r1(y) + ' ' + r1(x + sz) + ',' + r1(y + sz / 2) +
         ' ' + r1(x + sz / 2) + ',' + r1(y + sz) + ' ' + r1(x) + ',' + r1(y + sz / 2) +
-        '" fill="#ffffff" stroke="' + stroke + '" stroke-width="' + w + '"/>';
+        '" fill="' + bg + '" stroke="' + stroke + '" stroke-width="' + w + '"/>';
     }
     return '<rect x="' + r1(x) + '" y="' + r1(y) + '" width="' + r1(sz) + '" height="' + r1(sz) +
-      '" fill="#ffffff" stroke="' + stroke + '" stroke-width="' + w + '"/>';
+      '" fill="' + bg + '" stroke="' + stroke + '" stroke-width="' + w + '"/>';
   }
 
   /**
@@ -1586,9 +1629,9 @@
     }
     if (people.some(function (p) { return p.index; })) {
       items.push({ name: '案主', mark: function (x, yy) {
-        return '<rect x="' + x + '" y="' + r1(yy - 6) + '" width="12" height="12" fill="#ffffff" stroke="' +
-          C.accent + '" stroke-width="1.2"/><rect x="' + (x + 2.5) + '" y="' + r1(yy - 3.5) +
-          '" width="7" height="7" fill="none" stroke="' + C.accent + '" stroke-width="1"/>'; } });
+        return '<rect x="' + x + '" y="' + r1(yy - 6) + '" width="12" height="12" fill="' + C.ink +
+          '" stroke="' + C.accent + '" stroke-width="1.2"/><rect x="' + (x + 2.5) + '" y="' + r1(yy - 3.5) +
+          '" width="7" height="7" fill="none" stroke="' + C.paper + '" stroke-width="1"/>'; } });
     }
     if (people.some(function (p) { return p.dead; })) {
       items.push({ name: '已歿', mark: function (x, yy) {

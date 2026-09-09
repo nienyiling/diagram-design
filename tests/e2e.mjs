@@ -1071,8 +1071,16 @@ await t('家系圖打得開，一列可以是成員／伴侶關係／情感關�
   assert.equal(await page.locator('#f_genogram_0_kind').count(), 0, '成員列還留著型別下拉');
   assert.deepEqual(await page.locator('.fgroup h3').allInnerTexts(), ['成員', '關係']);
   const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
-  ['祖父', '姑姑', '分居 85'].forEach((w) =>
+  /* 姓名／稱謂預設不畫在圖上（個案資料），所以這裡問的是年齡、學歷與婚姻狀態 */
+  ['78', '高中職', '分居 85'].forEach((w) =>
     assert.ok(svgText.includes(w), '範例的圖上少了「' + w + '」：' + svgText.slice(0, 120)));
+  assert.ok(!svgText.includes('祖父'), '姓名／稱謂預設就畫上去了');
+  await page.locator('#m_genogram_names').selectOption('on');
+  await page.waitForTimeout(500);
+  const withNames = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(withNames.includes('祖父'), '改成顯示卻還是不畫姓名');
+  await page.locator('#m_genogram_names').selectOption('off');
+  await page.waitForTimeout(400);
 });
 
 await t('家系圖：型別換成「伴侶關係」時，欄位跟著換一整組', async () => {
@@ -1098,11 +1106,14 @@ await t('家系圖：「父親」的下拉只列前面已經填過的成員', as
   assert.ok(!opts.includes('弟'), '後面才填的成員不該出現在父親欄：' + opts.join('／'));
 });
 
-await t('家系圖：改一個人的名字，圖上跟著改', async () => {
+await t('家系圖：改一個人的名字，圖上跟著改（把姓名打開才看得到）', async () => {
+  await page.locator('#m_genogram_names').selectOption('on');
   await page.locator('#f_genogram_5_name').fill('小美');
   await page.waitForTimeout(500);
   const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
   assert.ok(svgText.includes('小美'), svgText.slice(0, 150));
+  await page.locator('#m_genogram_names').selectOption('off');
+  await page.waitForTimeout(400);
 });
 
 await t('家系圖：勾「已歿」圖上就打叉，勾「案主」就變雙框', async () => {
@@ -1164,7 +1175,9 @@ await t('家系圖下載得出來，而且不會掛上不相干的來源標註',
   ]);
   const text = fs.readFileSync(await download.path(), 'utf8');
   assert.ok(text.includes('Case 2026'));
-  assert.ok(text.includes('姑姑'));
+  /* 姓名預設不畫，所以下載的那份要看的是學歷與年齡 */
+  assert.ok(text.includes('高中職'));
+  assert.ok(!text.includes('姑姑'), '姓名／稱謂預設就下載出去了');
   /* 家系圖與關係圖在上游那 153 張裡沒有對應的範本，是自己畫的：
      掛上游的來源等於引用了一個跟這張圖無關的出處 */
   assert.ok(!text.includes('cathrynlavery/diagram-design'),
