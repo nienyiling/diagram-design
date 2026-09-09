@@ -805,28 +805,26 @@ await t('家系圖：男是方形、女是圓形、性別不明是菱形', () =>
   assert.ok(/<polygon/.test(genoSvg([P('丙', { sex: 'u' })])), '性別不明不是菱形');
 });
 
-await t('家系圖：案主填深色加雙框（社工實務上就是這樣標，一眼看得到）', () => {
+await t('家系圖：案主填一層淡色再加雙框（一眼看得到，又不吃掉裡面的字）', () => {
   const plain = genoBody(genoSvg([P('甲')]));
   const idx = genoBody(genoSvg([P('甲', { index: true })]));
   const accent = (svg) => (svg.match(new RegExp('<rect[^>]*stroke="' +
     DD.UPSTREAM_LIGHT.accent + '"', 'g')) || []).length;
   assert.equal(accent(plain), 0, '沒標案主卻用了強調色');
-  assert.equal(accent(idx), 1, '案主的外框沒有用強調色');
-  /* 外框填深色、裡面再一圈紙色的內框 */
-  assert.ok(new RegExp('<rect[^>]*fill="' + DD.UPSTREAM_LIGHT.ink + '"[^>]*stroke="' +
-    DD.UPSTREAM_LIGHT.accent + '"').test(idx), '案主沒有填深色');
-  assert.ok(new RegExp('<rect[^>]*stroke="' + DD.UPSTREAM_LIGHT.paper + '"').test(idx),
-    '深色底上少了看得見的內框');
-  assert.ok(!new RegExp('<rect[^>]*fill="' + DD.UPSTREAM_LIGHT.ink + '"').test(plain),
-    '沒標案主的人不該被填深色');
+  assert.equal(accent(idx), 2, '案主沒有畫成雙框');
+  /* 底色要是「淡的」：塗滿深色的話裡面的年齡與已歿的叉都會被吃掉 */
+  const fill = /<rect[^>]*fill="rgba\(235,108,54,([\d.]+)\)"/.exec(idx);
+  assert.ok(fill, '案主沒有填色');
+  assert.ok(+fill[1] > 0 && +fill[1] <= 0.35, '案主的底色太深了：' + fill[1]);
+  assert.ok(!/fill="rgba\(235,108,54/.test(plain), '沒標案主的人不該被填色');
 });
 
-await t('家系圖：案主身上的字與叉要改成紙色，不然深色底上看不見', () => {
+await t('家系圖：案主身上的年齡與已歿的叉照樣是深色（淡底才看得見）', () => {
   const svg = genoBody(genoSvg([P('甲', { index: true, age: '16', dead: true })]));
-  const paper = DD.UPSTREAM_LIGHT.paper;
-  assert.ok(new RegExp('<text[^>]*fill="' + paper + '"[^>]*>16<').test(svg), '年齡看不見');
-  assert.equal((svg.match(new RegExp('<line[^>]*stroke="' + paper + '"', 'g')) || []).length, 2,
-    '已歿的叉沒有改成紙色');
+  const ink = DD.UPSTREAM_LIGHT.ink;
+  assert.ok(new RegExp('<text[^>]*fill="' + ink + '"[^>]*>16<').test(svg), '年齡不見了');
+  assert.equal((svg.match(new RegExp('<line[^>]*stroke="' + ink + '"', 'g')) || []).length, 2,
+    '已歿的叉不見了');
 });
 
 await t('家系圖：姓名／稱謂預設不畫在圖上，改了設定才畫', () => {

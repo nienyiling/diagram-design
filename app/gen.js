@@ -996,6 +996,10 @@
     { value: 'on', label: '顯示' }
   ];
 
+  /* 案主的底色：淡到不會吃掉裡面的字，又一眼看得出被塗過。
+     用強調色的透明版，換配色那條路照樣吃得到。 */
+  var INDEX_FILL = 'rgba(235,108,54,0.18)';
+
   var GENO = {
     size: 46, gapX: 46, coupleGap: 96, genH: 150, top: 74, left: 46, right: 954
   };
@@ -1045,7 +1049,7 @@
     help: [
       '先填寫成員，填寫完畢後再選擇關係。',
       '父母只能選前面已經填過的成員，所以由上而下（祖父母 → 父母 → 子女）填最順。',
-      '符號：男□、女○、性別不明◇、案主填深色加雙框、已歿打叉；一男一女的伴侶男左女右。',
+      '符號：男□、女○、性別不明◇、案主填色加雙框、已歿打叉；一男一女的伴侶男左女右。',
       '姓名／稱謂預設不畫在圖上（個案資料），要顯示就改上面那個選項；學歷是選填的。'
     ],
     /* 一張表分兩段：成員填完才輪到關係。三種列全混在一條長表裡時，
@@ -1475,13 +1479,12 @@
   function personGlyph(p, sz, scale, opts) {
     var o = opts || {};
     var out = [];
-    /* 案主填深色：社工實務上就是這樣標，比雙框更一眼看得到。雙框留著，
-       兩種慣例都在，印成黑白時也還分得出來。 */
+    /* 案主填一層淡淡的強調色：社工實務上會把個案塗色，但塗滿深色的話
+       裡面的年齡與已歿的叉都會被吃掉。淡色底＋雙框，兩件事都看得到。 */
     var stroke = p.index ? C.accent : C.ink;
-    out.push(sexShape(p, p.px, p.py, sz, stroke, 1.4, p.index ? C.ink : '#ffffff'));
-    if (p.index) out.push(sexShape(p, p.px + 4, p.py + 4, sz - 8, C.paper, 1.1, 'none'));
-    /* 深色底上的線與字要改成紙色，不然整個看不見 */
-    var mark = p.index ? C.paper : C.ink;
+    out.push(sexShape(p, p.px, p.py, sz, stroke, 1.4, p.index ? INDEX_FILL : '#ffffff'));
+    if (p.index) out.push(sexShape(p, p.px + 4, p.py + 4, sz - 8, stroke, 1.1, 'none'));
+    var mark = C.ink;
     if (p.dead) {
       out.push('<line x1="' + r1(p.px + 3) + '" y1="' + r1(p.py + 3) + '" x2="' + r1(p.px + sz - 3) +
         '" y2="' + r1(p.py + sz - 3) + '" stroke="' + mark + '" stroke-width="1.4"/>');
@@ -1629,9 +1632,9 @@
     }
     if (people.some(function (p) { return p.index; })) {
       items.push({ name: '案主', mark: function (x, yy) {
-        return '<rect x="' + x + '" y="' + r1(yy - 6) + '" width="12" height="12" fill="' + C.ink +
+        return '<rect x="' + x + '" y="' + r1(yy - 6) + '" width="12" height="12" fill="' + INDEX_FILL +
           '" stroke="' + C.accent + '" stroke-width="1.2"/><rect x="' + (x + 2.5) + '" y="' + r1(yy - 3.5) +
-          '" width="7" height="7" fill="none" stroke="' + C.paper + '" stroke-width="1"/>'; } });
+          '" width="7" height="7" fill="none" stroke="' + C.accent + '" stroke-width="1"/>'; } });
     }
     if (people.some(function (p) { return p.dead; })) {
       items.push({ name: '已歿', mark: function (x, yy) {
