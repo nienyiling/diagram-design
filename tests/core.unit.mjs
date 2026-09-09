@@ -781,17 +781,64 @@ await t('svgToWordGroup：自己畫的圖換得成 Word 圖案，而且每一段
 await t('svgToWordGroup：座標跟原圖對得上（x1/y1 這種帶數字的屬性最容易漏讀）', () => {
   const g = DD.svgToWordGroup(wordSvg, { scale: 1, title: 'x' });
   const EMU = 9525;
-  /* 直線 70,35 → 135,35：左上角在 (70,35)，寬 65、高 0 */
-  const m = /<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"\/><\/a:xfrm><a:prstGeom prst="line"/.exec(g);
-  assert.ok(m, '找不到那條直線');
-  assert.equal(+m[1], 70 * EMU, '線的起點 x 不對（屬性名字讀錯會變成 0）');
-  assert.equal(+m[2], 35 * EMU);
-  assert.equal(+m[3], 65 * EMU, '線的長度不對');
-  assert.equal(+m[4], 0);
-  /* 圓 cx=150 r=15：外框左上角在 (135,20)、寬高各 30 */
-  const c = /<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"\/><\/a:xfrm><a:prstGeom prst="ellipse"/.exec(g);
-  assert.equal(+c[1], 135 * EMU);
-  assert.equal(+c[3], 30 * EMU);
+  const at = (prst) => {
+    const m = new RegExp('<a:off x="(\\d+)" y="(\\d+)"\\/><a:ext cx="(\\d+)" cy="(\\d+)"\\/>' +
+      '<\\/a:xfrm><a:prstGeom prst="' + prst + '"').exec(g);
+    assert.ok(m, '找不到 ' + prst);
+    return { x: +m[1] / EMU, y: +m[2] / EMU, w: +m[3] / EMU, h: +m[4] / EMU };
+  };
+  /* 整張圖會裁掉四周留白再往左上推，所以比的是「相對關係」不是絕對座標 */
+  const line = at('line'), ell = at('ellipse'), rect = at('roundRect');
+  assert.equal(line.w, 65, '線的長度不對（屬性名字讀錯會變成 0）');
+  assert.equal(line.h, 0);
+  assert.equal(ell.w, 30, '圓的大小不對');
+  assert.equal(ell.h, 30);
+  /* 原圖：方塊在 x=10、線從 x=70 開始、圓的外框在 x=135 */
+  assert.equal(line.x - rect.x, 60, '線的起點跟方塊的距離不對');
+  assert.equal(ell.x - rect.x, 125, '圓跟方塊的距離不對');
+  assert.equal(line.y - rect.y, 15, '線的高度跟方塊對不上');
+});
+
+await t('svgToWordGroup：滿版的底色與網點不進 Word（要的是圖本身）', () => {
+  const withBg = '<svg viewBox="0 0 200 100">' +
+    '<rect width="100%" height="100%" fill="#f5f5f5"/>' +
+    '<rect width="100%" height="100%" fill="url(#dots)"/>' +
+    '<rect x="10" y="20" width="60" height="30" fill="#ffffff" stroke="#2d3142"/></svg>';
+  const g = DD.svgToWordGroup(withBg, { scale: 1 });
+  assert.equal((g.match(/<wps:wsp>/g) || []).length, 1, '底色被當成一個形狀塞進去了');
+  assert.ok(!g.includes('F5F5F5'), '滿版的底色還在');
+});
+
+await t('svgToWordGroup：裁掉四周的留白，圖不會拖著一片空白進 Word', () => {
+  /* 內容只佔左上角一小塊，畫布卻是 1000×600 */
+  const sparse = '<svg viewBox="0 0 1000 600">' +
+    '<rect x="20" y="20" width="80" height="40" fill="#ffffff" stroke="#2d3142"/></svg>';
+  const g = DD.svgToWordGroup(sparse, { scale: 1 });
+  const ext = /<wp:extent cx="(\d+)" cy="(\d+)"/.exec(g);
+  assert.ok(+ext[1] / 9525 < 200, '寬度沒有裁到內容上：' + (+ext[1] / 9525));
+  assert.ok(+ext[2] / 9525 < 120, '高度沒有裁到內容上：' + (+ext[2] / 9525));
+});
+
+await t('svgToWordGroup：整張放大到「最大的那段字剛好 14pt」，字級的大小關係留著', () => {
+  const mixed = '<svg viewBox="0 0 400 200">' +
+    '<rect x="10" y="10" width="200" height="60" fill="#ffffff" stroke="#2d3142"/>' +
+    '<text x="110" y="45" fill="#2d3142" font-size="12" text-anchor="middle">主文</text>' +
+    '<text x="110" y="90" fill="#4f5d75" font-size="6" text-anchor="middle">小字</text></svg>';
+  const g = DD.svgToWordGroup(mixed, {});
+  const pts = [...g.matchAll(/<w:sz w:val="(\d+)"\/>/g)].map((m) => +m[1] / 2);
+  assert.equal(Math.max(...pts), 14, '最大的那一段字不是 14pt：' + pts.join(','));
+  assert.equal(Math.min(...pts), 7, '小字沒有照比例縮，大小關係就沒了：' + pts.join(','));
+});
+
+await t('svgToWordGroup：文字方塊會跟著字長大（在 Word 裡把字調大不該被裁掉）', () => {
+  const g = DD.svgToWordGroup(wordSvg, { scale: 1 });
+  /* 只有文字方塊要自動長大；一般形狀（方塊、圓）維持固定大小 */
+  const boxes = g.match(/<wps:txbx>[\s\S]*?<\/wps:wsp>/g) || [];
+  assert.ok(boxes.length, '沒有文字方塊');
+  boxes.forEach((b) => {
+    assert.ok(b.includes('<a:spAutoFit/>'), '文字方塊是固定大小，字調大就會被裁掉');
+    assert.ok(b.includes('wrap="none"'), '文字方塊會自己折行，改字時版面會亂掉');
+  });
 });
 
 await t('svgToWordGroup：字級換算成半點，縮圖時字也跟著縮', () => {
@@ -808,6 +855,30 @@ await t('svgToWordGroup：認不得的 SVG 一律回 null，不要猜著轉', ()
   assert.equal(DD.svgToWordGroup('<svg viewBox="0 0 10 10"></svg>', {}), null, '空的圖不該產出空群組');
   assert.equal(DD.wordShapesOk(wordSvg), true);
   assert.equal(DD.wordShapesOk('<svg viewBox="0 0 10 10"><g/></svg>'), false);
+});
+
+await t('buildDocx：換得成圖案時，檔案裡就只有那張圖（沒有標題、說明與底色）', () => {
+  const bytes = DD.buildDocx({ svg: wordSvg, png: new Uint8Array(0), w: 200, h: 100,
+    title: '測試圖', credit: false });
+  const text = Buffer.from(bytes).toString('utf8');
+  assert.ok(text.includes('<wpg:wgp>'), '沒有用 Word 圖案群組');
+  assert.ok(!text.includes('轉換成圖形'), '還留著一行說明');
+  assert.ok(!text.includes('cathrynlavery'), '自己畫的圖還掛著來源');
+  /* 段落只剩「放圖的那一段」；多一段字使用者就得先刪掉才能用 */
+  assert.equal((text.match(/<w:p>/g) || []).length -
+    (text.match(/<w:txbxContent><w:p>/g) || []).length, 1, '除了圖以外還有別的段落');
+});
+
+await t('buildDocx：版面配合圖，不是圖配合版面', () => {
+  const bytes = DD.buildDocx({ svg: wordSvg, png: new Uint8Array(0), w: 200, h: 100 });
+  const text = Buffer.from(bytes).toString('utf8');
+  const ext = /<wp:extent cx="(\d+)" cy="(\d+)"/.exec(text);
+  const pg = /<w:pgSz w:w="(\d+)" w:h="(\d+)"/.exec(text);
+  const twip = (emu) => Math.round(emu / 9525 * 15);
+  assert.equal(+pg[1], twip(+ext[1]) + 567 * 2, '頁寬不是「圖寬＋左右各 1 公分」');
+  assert.equal(+pg[2], twip(+ext[2]) + 567 * 2, '頁高不是「圖高＋上下各 1 公分」');
+  /* 寬的圖要開橫式，不然 Word 會照直式的版面切頁 */
+  assert.ok(text.includes('w:orient="landscape"'), '寬的圖沒有開成橫式');
 });
 
 await t('buildDocx：換得成圖案時不放圖片，關聯裡也不留指不到的檔案', () => {

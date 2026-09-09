@@ -878,13 +878,16 @@ await t('下載 Word 檔：整張圖是 Word 圖案，圖上的字一段都不�
   const utf = buf.toString('utf8');
   assert.ok(utf.includes('<wpg:wgp>'), '圖沒有變成 Word 圖案群組');
   assert.ok(words.length > 3, '這張圖上本來就沒幾個字，測不到東西');
-  /* 下載的那份還多了標題與來源標註，所以是「不少於」；重點是一段都不能掉 */
-  assert.ok((utf.match(/<wps:txbx>/g) || []).length >= words.length,
-    '文字方塊比圖上的字還少，掉字了');
+  /* Word 檔裡就只有圖本身（沒有標題、說明與來源），所以字數要剛好對上 */
+  assert.equal((utf.match(/<wps:txbx>/g) || []).length, words.length,
+    '文字方塊的數量跟圖上的字對不起來');
   words.forEach((w) => assert.ok(utf.includes(w), '.docx 裡少了「' + w + '」'));
   assert.ok(!buf.toString('latin1').includes('word/media/'), '已經是圖案了還塞圖片進去');
-  assert.ok((await page.locator('#edOk').innerText()).includes('不必再按'),
-    '沒有告訴使用者這張圖打開就能改');
+  /* 字要看得見：最大的那一段是 14pt */
+  const pts = [...utf.matchAll(/<w:sz w:val="(\d+)"\/>/g)].map((m) => +m[1] / 2);
+  assert.equal(Math.max(...pts), 14, 'Word 檔裡的字太小了：' + [...new Set(pts)].join(','));
+  assert.ok((await page.locator('#edOk').innerText()).includes('取消群組'),
+    '沒有告訴使用者怎麼把群組拆開來改');
 });
 
 /* ── 版面：預覽要跟著看得到，手機上一列要是一張卡 ─────────────────── */

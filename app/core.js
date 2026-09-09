@@ -1097,6 +1097,15 @@
       '<a:rect l="0" t="0" r="' + pw + '" b="' + ph + '"/><a:pathLst>' + body + '</a:pathLst></a:custGeom>';
   }
 
+  /* Word 檔裡「最大的那一段字」要有這麼大。以前是把整張圖縮到 A4 直式的寬度，
+     13px 的字只剩 6pt——印出來看不到，在 Word 裡調大又會被文字方塊裁掉。
+     現在反過來：先決定字要多大，再讓頁面配合圖，而不是讓圖配合頁面。 */
+  var MIN_PT = 14;
+  /* 放大倍率的上限。三倍以上的圖沒有人放得進報告裡，那時候寧可字小一點。 */
+  var WORD_MAX_SCALE = 3;
+  /* 裁切後四周留一點白，不然形狀會貼著群組的邊 */
+  var WORD_PAD = 10;
+
   /** 這張圖換不換得成 Word 圖案。畫面上要據此講不同的話，別讓使用者去猜。 */
   function wordShapesOk(svg) {
     return svgToWordGroup(svg, { scale: 1 }) !== null;
@@ -1147,9 +1156,18 @@
     if (/<[a-zA-Z]/.test(clean.replace(WORD_TAGS, ''))) return false;
 
     var k = ctx.k, m;
-    var X = function (v) { return (dx + v * s) * k; };
-    var Y = function (v) { return (dy + v * s) * k; };
+    /* ox／oy 是「裁掉四周留白」的位移：第一趟先量出圖真正佔到哪裡，第二趟整個往左上推。 */
+    var X = function (v) { return (dx + v * s) * k - ctx.ox; };
+    var Y = function (v) { return (dy + v * s) * k - ctx.oy; };
     var L = function (v) { return v * s * k; };
+    /* 每一個形狀都順手記進外框，量完才知道要裁多少、能放多大 */
+    var box = function (x, y, w, h, fh, fv) {
+      if (x < ctx.minX) ctx.minX = x;
+      if (y < ctx.minY) ctx.minY = y;
+      if (x + w > ctx.maxX) ctx.maxX = x + w;
+      if (y + h > ctx.maxY) ctx.maxY = y + h;
+      return xfrmXml(x, y, w, h, fh, fv);
+    };
     WORD_TAGS.lastIndex = 0;
     while ((m = WORD_TAGS.exec(clean))) {
       var tag = m[1], a = svgAttrs(m[0].slice(tag.length + 1).replace(/\/?>$/, ''));
@@ -1161,6 +1179,9 @@
       if (tag === 'rect') {
         var rw = svgNum(a.width, 0, ctx.W), rh = svgNum(a.height, 0, ctx.H);
         if (!(rw > 0 && rh > 0)) continue;
+        /* 滿版的底色與網點在 Word 裡是多餘的：使用者要的是圖本身，
+           一塊跟頁面一樣大的方塊只會擋住底下的東西，還得先刪掉才能編輯 */
+        if (rw >= ctx.W * 0.99 && rh >= ctx.H * 0.99) continue;
         var round = svgNum(a.rx, 0, 0);
         var geom = round > 0
           ? '<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ' +
@@ -1168,7 +1189,7 @@
             '"/></a:avLst></a:prstGeom>'
           : '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>';
         ctx.shapes.push(wordWsp(ctx.id++, '方塊 ' + ctx.id,
-          xfrmXml(X(svgNum(a.x, 0, ctx.W)), Y(svgNum(a.y, 0, ctx.H)), L(rw), L(rh)),
+          box(X(svgNum(a.x, 0, ctx.W)), Y(svgNum(a.y, 0, ctx.H)), L(rw), L(rh)),
           geom, wordFill(fill, op), ln));
         continue;
       }
@@ -1176,7 +1197,7 @@
         var r = svgNum(a.r, 0, 0);
         if (!(r > 0)) continue;
         ctx.shapes.push(wordWsp(ctx.id++, '圓 ' + ctx.id,
-          xfrmXml(X(svgNum(a.cx, 0, ctx.W) - r), Y(svgNum(a.cy, 0, ctx.H) - r), L(2 * r), L(2 * r)),
+          box(X(svgNum(a.cx, 0, ctx.W) - r), Y(svgNum(a.cy, 0, ctx.H) - r), L(2 * r), L(2 * r)),
           '<a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom>', wordFill(fill, op), ln));
         continue;
       }
@@ -1184,7 +1205,7 @@
         var x1 = svgNum(a.x1, 0, ctx.W), y1 = svgNum(a.y1, 0, ctx.H);
         var x2 = svgNum(a.x2, 0, ctx.W), y2 = svgNum(a.y2, 0, ctx.H);
         ctx.shapes.push(wordWsp(ctx.id++, '線 ' + ctx.id,
-          xfrmXml(X(Math.min(x1, x2)), Y(Math.min(y1, y2)),
+          box(X(Math.min(x1, x2)), Y(Math.min(y1, y2)),
             L(Math.abs(x2 - x1)), L(Math.abs(y2 - y1)), x2 < x1, y2 < y1),
           '<a:prstGeom prst="line"><a:avLst/></a:prstGeom>', '<a:noFill/>', ln));
         continue;
@@ -1213,7 +1234,7 @@
         });
         if (!isFinite(minX)) continue;
         var cw = L(maxX - minX), ch = L(maxY - minY);
-        ctx.shapes.push(wordWsp(ctx.id++, '線條 ' + ctx.id, xfrmXml(X(minX), Y(minY), cw, ch),
+        ctx.shapes.push(wordWsp(ctx.id++, '線條 ' + ctx.id, box(X(minX), Y(minY), cw, ch),
           custGeomXml(subs, minX, minY, s * k, cw, ch), wordFill(fill, op), ln));
         continue;
       }
@@ -1233,6 +1254,7 @@
       } else {
         lines.push({ x: svgNum(a.x, 0, ctx.W), y: svgNum(a.y, 0, ctx.H), s: raw });
       }
+      if (fs * s > ctx.maxFs) ctx.maxFs = fs * s;
       lines.forEach(function (line) {
         var str = line.s.replace(/<[^>]*>/g, '');
         if (!str) return;
@@ -1253,7 +1275,9 @@
         if (!ascii) ascii = east || 'serif';
         if (!east) east = ascii;
         var col = wordColor(a.fill) || { hex: '000000', alpha: 1 };
-        var sz = Math.max(2, Math.round(fs * s * ctx.scale * 1.5));   /* px → 半點（96dpi） */
+        /* px → 半點（96dpi）。字級之間的大小關係要留著（主文大、圖例小），
+           所以不逐段設下限，而是整張圖一起放大到「最大的那一段剛好 MIN_PT」。 */
+        var sz = Math.max(2, Math.round(fs * s * ctx.scale * 1.5));
         var rpr = '<w:rPr><w:rFonts w:ascii="' + escapeXml(ascii) + '" w:hAnsi="' + escapeXml(ascii) +
           '" w:eastAsia="' + escapeXml(east) + '" w:cs="' + escapeXml(ascii) + '"/>' +
           (svgNum(a['font-weight'], 400, 0) >= 600 ? '<w:b/><w:bCs/>' : '') +
@@ -1264,11 +1288,13 @@
           '<w:jc w:val="' + jc + '"/>' + rpr + '</w:pPr>' +
           '<w:r>' + rpr + '<w:t xml:space="preserve">' + str + '</w:t></w:r></w:p>';
         ctx.shapes.push(wordWsp(ctx.id++, '文字 ' + ctx.id,
-          xfrmXml(X(left), Y(line.y - fs * 1.15), L(boxW), L(fs * 1.6)),
+          box(X(left), Y(line.y - fs * 1.15), L(boxW), L(fs * 1.6)),
           '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>', '<a:noFill/>', '<a:ln><a:noFill/></a:ln>',
           '<wps:txbx><w:txbxContent>' + para + '</w:txbxContent></wps:txbx>',
+          /* spAutoFit：使用者在 Word 裡把字放大時，方塊要跟著長大。
+             noAutofit 的話字會被原本的框裁掉，看起來像字不見了。 */
           '<wps:bodyPr rot="0" vert="horz" wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" ' +
-          'anchor="ctr" anchorCtr="0"><a:noAutofit/></wps:bodyPr>'));
+          'anchor="ctr" anchorCtr="0"><a:spAutoFit/></wps:bodyPr>'));
       });
     }
     return true;
@@ -1289,13 +1315,33 @@
     var box = vb[1].trim().split(/\s+/).map(Number);
     if (box.length !== 4 || box[0] !== 0 || box[1] !== 0 || !(box[2] > 0) || !(box[3] > 0)) return null;
 
-    var scale = opt.scale || 1;
-    var ctx = { shapes: [], id: 2, k: scale * EMU, scale: scale, W: box[2], H: box[3] };
     var body = src.slice(open.index + open[0].length).replace(/<\/svg>\s*$/, '');
-    if (!walkSvgShapes(body, 0, 0, 1, ctx)) return null;
-    if (!ctx.shapes.length) return null;
 
-    var cx = Math.round(box[2] * ctx.k), cy = Math.round(box[3] * ctx.k);
+    /* 兩趟：第一趟只為了量「圖真正佔到哪裡」，第二趟才照裁切後的大小重排。
+       不裁的話一張只用到半個畫布的家系圖，會連著大片空白一起縮進頁面裡，字就更小了。 */
+    function pass(scale, ox, oy) {
+      var c = { shapes: [], id: 2, k: scale * EMU, scale: scale, W: box[2], H: box[3],
+        ox: ox || 0, oy: oy || 0, maxFs: 0,
+        minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+      return walkSvgShapes(body, 0, 0, 1, c) && c.shapes.length ? c : null;
+    }
+
+    var probe = pass(1, 0, 0);
+    if (!probe) return null;
+    var wUnits = (probe.maxX - probe.minX) / EMU + WORD_PAD * 2;
+    var hUnits = (probe.maxY - probe.minY) / EMU + WORD_PAD * 2;
+    if (!(wUnits > 0 && hUnits > 0)) return null;
+
+    /* 整張一起放大到「最大的那一段字剛好 MIN_PT」。字級之間的大小關係就留著了，
+       而且形狀跟著等比長大——只把字放大的話，字會滿出自己的方塊。 */
+    var natural = probe.maxFs * 0.75;   /* px@96dpi → pt */
+    var scale = opt.scale ||
+      Math.max(1, Math.min(WORD_MAX_SCALE, natural > 0 ? MIN_PT / natural : 1));
+    var ctx = pass(scale, probe.minX * scale - WORD_PAD * scale * EMU,
+      probe.minY * scale - WORD_PAD * scale * EMU);
+    if (!ctx) return null;
+
+    var cx = Math.round(wUnits * scale * EMU), cy = Math.round(hUnits * scale * EMU);
     var name = escapeXml(String(opt.title || '圖'));
     return '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing>' +
       '<wp:inline distT="0" distB="0" distL="0" distR="0">' +
@@ -1332,7 +1378,11 @@
 
     /* 先試著整張換成 Word 自己的圖案（打開就能改字）。
        範本庫那種任意 SVG 換不了，才退回「圖片＋SVG」那條老路。 */
-    var group = svgToWordGroup(o.svg, { scale: scale, title: title });
+    /* 不傳 scale：換成圖案時由 svgToWordGroup() 自己決定要放多大（字要看得見），
+       頁面再配合它。scale 只有「換不成、退回圖片」那條路才用得到。 */
+    var groupXml = svgToWordGroup(o.svg, { title: title });
+    var groupExt = groupXml && /<wp:extent cx="(\d+)" cy="(\d+)"/.exec(groupXml);
+    var group = groupXml ? { xml: groupXml, w: +groupExt[1], h: +groupExt[2] } : null;
     var picture = '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing>' +
       '<wp:inline distT="0" distB="0" distL="0" distR="0">' +
       '<wp:extent cx="' + cx + '" cy="' + cy + '"/>' +
@@ -1348,10 +1398,21 @@
       '</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
 
     /* 一打開就講得出這張圖能怎麼動——不然沒人知道 */
-    var note = group
-      ? '圖上的每一個方塊、每一行字都是 Word 圖案：直接點就能拖、能改字、能換顏色。'
-      : '要修改圖上的方塊或文字：在圖片上按右鍵 →「轉換成圖形」（Word 2016 以上）。' +
-        '註：Word 轉換時可能會把圖上的文字轉丟，那時候請改用 SVG 或 PNG。';
+    /* 換得成圖案時，檔案裡就只有那張圖：沒有標題、沒有說明、沒有底色。
+       使用者要的是「一份可以直接編輯的圖」，多一行字就得先刪掉才能用。
+       換不成的（範本庫那種）才留一句話，不然使用者不知道那張圖怎麼改。 */
+    var note = group ? '' :
+      '要修改圖上的方塊或文字：在圖片上按右鍵 →「轉換成圖形」（Word 2016 以上）。' +
+      '註：Word 轉換時可能會把圖上的文字轉丟，那時候請改用 SVG 或 PNG。';
+
+    /* 版面配合圖，不是圖配合版面：頁面就開成「圖的大小＋左右各 1 公分」。
+       硬塞進 A4 的話，圖只能縮到字剩 6pt。 */
+    var pgW = 11906, pgH = 16838, pgMar = 1134;
+    if (group && group.w && group.h) {
+      pgMar = 567;                                  /* 1 公分 */
+      pgW = Math.round(group.w / EMU * 15) + pgMar * 2;   /* px → twip（1px = 15 twip） */
+      pgH = Math.round(group.h / EMU * 15) + pgMar * 2;
+    }
 
     var docXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
@@ -1362,19 +1423,20 @@
       'xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup" ' +
       'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
       '<w:body>' +
-      (group || picture) +
-      '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>' +
-      '<w:rFonts w:ascii="DFKai-SB" w:eastAsia="標楷體" w:hAnsi="DFKai-SB"/>' +
-      '<w:sz w:val="18"/><w:color w:val="7F7F7F"/></w:rPr>' +
-      '<w:t xml:space="preserve">' + escapeXml(note) + '</w:t></w:r></w:p>' +
+      ((group && group.xml) || picture) +
+      (note ? '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>' +
+        '<w:rFonts w:ascii="DFKai-SB" w:eastAsia="標楷體" w:hAnsi="DFKai-SB"/>' +
+        '<w:sz w:val="18"/><w:color w:val="7F7F7F"/></w:rPr>' +
+        '<w:t xml:space="preserve">' + escapeXml(note) + '</w:t></w:r></w:p>' : '') +
       (o.credit === false ? '' :
         '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>' +
         '<w:rFonts w:ascii="DFKai-SB" w:eastAsia="標楷體" w:hAnsi="DFKai-SB"/>' +
         '<w:sz w:val="16"/><w:color w:val="A6A6A6"/></w:rPr>' +
         '<w:t xml:space="preserve">' + escapeXml(SOURCE.credit) + '</w:t></w:r></w:p>') +
-      '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>' +
-      '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" ' +
-      'w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>' +
+      '<w:sectPr><w:pgSz w:w="' + pgW + '" w:h="' + pgH + '"' +
+      (pgW > pgH ? ' w:orient="landscape"' : '') + '/>' +
+      '<w:pgMar w:top="' + pgMar + '" w:right="' + pgMar + '" w:bottom="' + pgMar +
+      '" w:left="' + pgMar + '" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>' +
       '</w:body></w:document>';
 
     /* 換成圖案時就沒有圖片了；關聯裡留著指不到的檔案，Word 會說檔案毀損 */

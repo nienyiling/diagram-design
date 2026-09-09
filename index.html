@@ -582,11 +582,14 @@
 
     <div class="card" id="dlCard">
       <h2>下載</h2>
-      <p class="hint"><strong>Word 檔</strong>裡的圖<strong>打開就能改</strong>：每一個方塊、
-        每一行字都是 Word 自己的圖案，直接點就能拖、改字、換顏色，不必按右鍵「轉換成圖形」
-        （那一步 Word 會把圖上的文字整批弄丟）。範本庫那些現成的圖換不了，只能以圖片放進去。
+      <p class="hint"><strong>Word 檔裡只有圖本身</strong>（標題、說明、底色都不放進去），
+        而且<strong>打開就能改</strong>：整張圖是一個群組，在圖上按右鍵 →「組成群組」→
+        「取消群組」之後，每個方塊、每一段字都點得到，可以拖、改字、換顏色，
+        不必按右鍵「轉換成圖形」（那一步 Word 會把圖上的文字整批弄丟）。
+        字級已經放大過，在 Word 裡再調大也不會被文字方塊切掉。
+        範本庫那些現成的圖換不了，只能以圖片放進去。
         PNG 給簡報用；SVG 是向量檔，放大不糊；HTML 可以離線開、用瀏覽器列印成 PDF。
-        每一種都會在圖的下方帶一行來源標註。</p>
+        從範本來的圖，每一種都會在圖的下方帶一行來源標註。</p>
       <div class="row">
         <button type="button" class="primary" id="copyPngBtn">複製圖片到剪貼簿</button>
         <button type="button" class="primary" id="dlDocx">下載 Word（可再編輯）</button>

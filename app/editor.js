@@ -300,11 +300,15 @@
    * .docx：自己填表產生的圖，整張會換成 Word 原生圖案——打開就能拖、就能改字，
    * 不必按右鍵「轉換成圖形」（實測 Word 2019 那一步會把圖上的文字整批轉丟）。
    * 範本庫那 153 張是別人寫的任意 SVG，換不了，仍走「圖片＋SVG＋PNG 後備」那條路。
+   *
+   * **這裡用的是原圖，不是 composed()。** Word 檔要的是「圖本身」：
+   * 眉標、標題、來源標註那幾行在 Word 裡是多餘的，使用者得先刪掉才能用；
+   * 授權要求的來源標註由 buildDocx() 另外以段落補上（範本來的那幾張才有）。
    */
   function saveDocx() {
     show(el.dlErr, '');
     show(el.edOk, '');
-    var svg = composed();
+    var svg = currentSvgMarkup();
     var box = DD.parseViewBox(svg) || { w: state.d.w, h: state.d.h };
     var shapes = DD.wordShapesOk(svg);
     /* 換得成 Word 圖案時就用不到後備圖片，畫 canvas、等 blob 那一整步也省下來 */
@@ -329,7 +333,8 @@
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       }), DD.safeFilename(baseName(), 'docx'));
       show(el.edOk, shapes
-        ? '已下載 Word 檔。圖上的方塊與文字都是 Word 圖案，打開就能拖、能改字，不必再按「轉換成圖形」。'
+        ? '已下載 Word 檔（只有圖本身，沒有標題與底色）。整張圖是一個群組：'
+          + '要改就先在圖上按右鍵 →「組成群組」→「取消群組」，之後每個方塊與每行字都能單獨改。'
         : (r.png.length
           ? '已下載 Word 檔。這張是範本圖，只能以圖片放進去；要改字請在 Word 裡按右鍵 →「轉換成圖形」（Word 有可能把圖上的文字轉丟，那時請改用 SVG）。'
           : '已下載 Word 檔（這張圖轉不出後備圖片，Word 2016 以下可能看不到圖，請改用 SVG）。'));
