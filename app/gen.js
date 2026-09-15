@@ -1123,6 +1123,186 @@
     }
   };
 
+  /* ══ 九、金字塔圖 ═══════════════════════════════════════════════════
+     層級、位階、比重。跟分層堆疊圖的差別是「愈往下愈寬」本身就是訊息：
+     法規位階、人力結構、篩選漏斗都靠那個斜邊講話，畫成一疊等寬的方塊就沒了。 */
+
+  var PYR_SHAPE_OPTIONS = [
+    { value: 'up', label: '正金字塔（上窄下寬）' },
+    { value: 'down', label: '倒金字塔／漏斗（上寬下窄）' },
+    { value: 'value', label: '依數量比例（要填數量）' }
+  ];
+
+  var PYR = {
+    cx: 420, half: 220, top: 76, bandH: 66, gap: 3,
+    /* 尖到頂的話第一層一個字都放不下，所以頂端切掉四成的一層寬 */
+    tip: 0.4,
+    rightX: 672, rightW: 960 - 672
+  };
+
+  /** 「1,200 人」這種要抓得出 1200；抓不到回 null（依數量比例會用到）。 */
+  function pyrValue(raw) {
+    var s = String(raw == null ? '' : raw).replace(/[０-９．]/g, function (c) {
+      return String.fromCharCode(c.charCodeAt(0) - 65248);
+    }).replace(/,/g, '');
+    var m = s.match(/-?\d+(\.\d+)?/);
+    if (!m) return null;
+    var v = parseFloat(m[0]);
+    return isFinite(v) ? v : null;
+  }
+
+  /** 每一層上下緣的半寬。等差的兩種是算出來的，依數量比例的是量出來的。 */
+  function pyrEdges(levels, shape) {
+    var n = levels.length, i, w = [];
+    if (shape === 'value') {
+      var max = 0;
+      levels.forEach(function (l) { if (l.value > max) max = l.value; });
+      if (!(max > 0)) max = 1;
+      for (i = 0; i < n; i++) {
+        /* 最小值也要看得見：太細的一層點不到、也寫不下字 */
+        w.push(Math.max(24, PYR.half * levels[i].value / max));
+      }
+      /* 一層的上緣是自己的寬、下緣接到下一層，中間就自然收成漏斗；
+         最後一層下緣沒得接，維持自己的寬（畫成一個矩形收尾）。 */
+      return levels.map(function (l, k) {
+        return [w[k], k + 1 < n ? w[k + 1] : w[k]];
+      });
+    }
+    var step = PYR.half / n;
+    return levels.map(function (l, k) {
+      var a = (k + PYR.tip) * step, b = (k + 1) * step;
+      return shape === 'down' ? [PYR.half - (a - step * PYR.tip), PYR.half - b + step * PYR.tip]
+        : [a, b];
+    });
+  }
+
+  var pyramidGen = {
+    id: 'pyramid',
+    name: '金字塔圖',
+    use: '層級與位階：法規位階、人力結構、優先順序。倒過來就是漏斗，篩選流程也畫得出來。',
+    sampleTitle: '法規位階',
+    rowName: '層',
+    help: [
+      '第一列畫在最上面。上窄下寬是預設，倒過來就是漏斗。',
+      '選「依數量比例」時，每一層的寬度照填的數量算，數量少的那層就細——' +
+        '報名、初審、錄取這種篩選流程用這個。',
+      '層名放在該層裡面，放不下會自動縮小，再放不下就移到右邊。說明與數量一律放右邊。'
+    ],
+    fields: [
+      { key: 'name', label: '層名', type: 'text', placeholder: '法律' },
+      { key: 'note', label: '說明（可留空）', type: 'text', placeholder: '公務人員任用法等' },
+      { key: 'value', label: '數量（可留空）', type: 'text', placeholder: '5', width: '120px' },
+      { key: 'focal', label: '重點層', type: 'check', width: '84px',
+        hint: '勾了會用強調色框起來' }
+    ],
+    meta: [
+      { key: 'shape', label: '形狀', type: 'select', options: PYR_SHAPE_OPTIONS, width: '250px' }
+    ],
+    example: [
+      { name: '法律', note: '公務人員任用法等', value: '5' },
+      { name: '施行細則', note: '各法之施行細則', value: '5' },
+      { name: '作業規定', note: '要點、注意事項', value: '18', focal: true },
+      { name: '函釋與案例', note: '個案解釋令函', value: '260' }
+    ],
+    build: function (rows, meta, opts) {
+      var warnings = [];
+      var m = meta || {};
+      var shape = optValue(PYR_SHAPE_OPTIONS, m.shape);
+      var levels = [];
+      (rows || []).forEach(function (row, i) {
+        var name = String(row.name || '').trim();
+        var note = String(row.note || '').trim();
+        var raw = String(row.value || '').trim();
+        if (!name) {
+          if (note || raw) warnings.push('第 ' + (i + 1) + ' 列沒有填層名，跳過了。');
+          return;
+        }
+        levels.push({
+          name: name, note: note, raw: raw, value: pyrValue(raw), focal: !!row.focal
+        });
+      });
+
+      if (!levels.length) {
+        return {
+          svg: emptyCanvas('在左邊填每一層的名稱，這裡就會出現金字塔圖'),
+          warnings: warnings, count: 0
+        };
+      }
+
+      if (shape === 'value') {
+        var bad = null;
+        levels.forEach(function (l) { if (!bad && !(l.value > 0)) bad = l; });
+        if (bad) {
+          warnings.push('「' + bad.name + '」沒有填數量（或填的不是數字），' +
+            '照數量比例算不出寬度，先畫成一般的金字塔。');
+          shape = 'up';
+        }
+      }
+
+      var n = levels.length;
+      var edges = pyrEdges(levels, shape);
+      var H = PYR.top + n * PYR.bandH + 96;
+      var out = [canvasOpen(H, '金字塔圖')];
+
+      levels.forEach(function (l, i) {
+        var y1 = PYR.top + i * PYR.bandH + PYR.gap / 2;
+        var y2 = PYR.top + (i + 1) * PYR.bandH - PYR.gap / 2;
+        var a = edges[i][0], b = edges[i][1];
+        var col = l.focal ? C.accent : C.ink;
+        out.push('<polygon points="' +
+          r1(PYR.cx - a) + ',' + r1(y1) + ' ' + r1(PYR.cx + a) + ',' + r1(y1) + ' ' +
+          r1(PYR.cx + b) + ',' + r1(y2) + ' ' + r1(PYR.cx - b) + ',' + r1(y2) +
+          '" fill="' + (l.focal ? 'rgba(235,108,54,0.08)' : '#ffffff') +
+          '" stroke="' + col + '" stroke-width="1"/>');
+
+        var my = (y1 + y2) / 2;
+        /* 層名放得下就放層裡面，縮到 10 還放不下就移到右邊——
+           硬塞的話字會凸出斜邊，看起來像畫壞了 */
+        var room = a + b - 26;
+        var size = DD.shrinkToFit(15, DD.textUnits(l.name) * 15, room, 10);
+        var outside = DD.textUnits(l.name) * size > room;
+        if (!outside) {
+          out.push(text(PYR.cx, my + size * 0.36, l.name,
+            { fill: C.ink, size: size, weight: '600', anchor: 'middle' }));
+        }
+
+        /* 右邊那一欄：數量在上、說明在下，用一條細線接回這一層 */
+        var edge = PYR.cx + Math.max(a, b);
+        out.push('<line x1="' + r1(edge + 8) + '" y1="' + r1(my) + '" x2="' + (PYR.rightX - 10) +
+          '" y2="' + r1(my) + '" stroke="rgba(45,49,66,0.16)" stroke-width="1"/>');
+
+        var lines = [];
+        if (outside) lines.push({ s: l.name, size: 14, weight: '600', fill: C.ink, h: 19 });
+        if (l.raw) {
+          lines.push({
+            s: l.raw, size: 11, fill: l.focal ? C.accent : C.ink, font: F.mono, h: 16
+          });
+        }
+        DD.wrapLabel(l.note, PYR.rightW / 10).forEach(function (ln) {
+          lines.push({ s: ln, size: 10, fill: C.muted, font: F.mono, h: 14 });
+        });
+        var total = lines.reduce(function (t, ln) { return t + ln.h; }, 0);
+        var ty = my - total / 2;
+        lines.forEach(function (ln) {
+          ty += ln.h;
+          out.push(text(PYR.rightX, ty - 4, ln.s, {
+            fill: ln.fill, size: ln.size, font: ln.font, weight: ln.weight
+          }));
+        });
+      });
+
+      out.push(legend(H - 58, [
+        { name: '一般層', mark: swatchRect('#ffffff', C.ink, 2) },
+        { name: '重點層', mark: swatchRect('rgba(235,108,54,0.08)', C.accent, 2) },
+        { name: shape === 'value' ? '每層的寬度照填的數量算'
+          : shape === 'down' ? '上寬下窄：愈往下愈少' : '上窄下寬：愈往下愈多',
+          mark: function () { return ''; } }
+      ]));
+      out.push('</svg>');
+      return { svg: out.join(''), warnings: warnings, count: levels.length };
+    }
+  };
+
   /* ══ 六、組織圖 ═══════════════════════════════════════════════════
      樹狀排版：葉子由左而右一個接一個放，父節點置中在自己的子節點上方。
      這是 tidy tree 的第一課，對編制表這種寬而淺的樹夠用，而且算得出來、測得到。
@@ -2590,7 +2770,8 @@
     return [(pts[best][0] + pts[best + 1][0]) / 2, (pts[best][1] + pts[best + 1][1]) / 2 - 5];
   }
 
-  var TYPES = [flowGen, swimlaneGen, orgGen, relationGen, genogramGen, ganttGen, timelineGen, layersGen, quadrantGen];
+  var TYPES = [flowGen, swimlaneGen, orgGen, relationGen, genogramGen, ganttGen, timelineGen,
+    layersGen, pyramidGen, quadrantGen];
 
   function byId(id) {
     for (var i = 0; i < TYPES.length; i++) if (TYPES[i].id === id) return TYPES[i];

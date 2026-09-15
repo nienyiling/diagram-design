@@ -80,13 +80,13 @@ await t('首頁只有「你要做哪一種圖」，範本區預設收起來', as
   assert.equal(await page.locator('.source').isVisible(), true);
 });
 
-await t('首頁最上面就是九個做圖入口，縮圖是產生器自己畫的', async () => {
+await t('首頁最上面就是十個做圖入口，縮圖是產生器自己畫的', async () => {
   const makes = page.locator('.make');
-  assert.equal(await makes.count(), 9, '九種產生器');
+  assert.equal(await makes.count(), 10, '十種產生器');
   assert.equal(await makes.first().getAttribute('href'), '#/make/flow');
   assert.ok((await makes.first().innerText()).includes('流程圖'));
   /* 縮圖不是圖片檔也不是範本，是產生器當場畫出來的 SVG */
-  assert.equal(await page.locator('.make .shot svg').count(), 9);
+  assert.equal(await page.locator('.make .shot svg').count(), 10);
 });
 
 await t('範本的快捷入口還在，只是退到收合區裡', async () => {
@@ -536,7 +536,7 @@ await t('不能轉 PNG 的範本，複製按鈕也一起停用', async () => {
   assert.equal(await page.locator('#copyPngBtn').isDisabled(), true);
 });
 
-/* ── 九種產生器：這是「範本只能換字」的解法 ─────────────────────────── */
+/* ── 十種產生器：這是「範本只能換字」的解法 ─────────────────────────── */
 
 await t('每一種產生器都打得開，一進去就有一份公務情境的範例', async () => {
   for (const [id, name, word] of [
@@ -545,7 +545,8 @@ await t('每一種產生器都打得開，一進去就有一份公務情境的�
     ['timeline', '時間軸', '修正草案預告'],
     ['layers', '分層堆疊圖', '受理與分辦'],
     ['quadrant', '四象限圖', '線上申辦改版'],
-    ['relation', '關係圖', '國營事業']
+    ['relation', '關係圖', '國營事業'],
+    ['pyramid', '金字塔圖', '函釋與案例']
   ]) {
     await page.goto(server.url + '#/make/' + id, { waitUntil: 'networkidle' });
     await page.locator('#stage svg').waitFor({ timeout: 5000 });
@@ -1616,8 +1617,8 @@ await t('資料檔掛掉時，畫面上看得見一句講得出下一步的錯�
   assert.ok(msg.includes('範本資料載不進來'), msg);
   assert.ok(msg.includes('file://'), '要講出「直接點開檔案不會動」這件事');
   assert.ok(msg.includes('照常可以用'), '要講清楚只有範本受影響');
-  /* 做圖那九種完全不需要範本資料，資料掛了它們還是要能用 */
-  assert.equal(await p2.locator('.make').count(), 9, '資料掛了就連做圖入口都不見了');
+  /* 做圖那十種完全不需要範本資料，資料掛了它們還是要能用 */
+  assert.equal(await p2.locator('.make').count(), 10, '資料掛了就連做圖入口都不見了');
   await p2.close();
 });
 

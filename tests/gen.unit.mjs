@@ -28,12 +28,13 @@ const defMeta = (gen) =>
   }, {});
 const buildExample = (gen) => gen.build(gen.example, defMeta(gen), {});
 
-/* ── 五種都要長得像同一種東西：規格是表單引擎照著長出畫面的依據 ────────── */
+/* ── 十種都要長得像同一種東西：規格是表單引擎照著長出畫面的依據 ────────── */
 
-await t('TYPES 是九種，id 不重複', () => {
-  assert.equal(G.TYPES.length, 9);
+await t('TYPES 是十種，id 不重複', () => {
+  assert.equal(G.TYPES.length, 10);
   assert.deepEqual(G.TYPES.map((g) => g.id),
-    ['flow', 'swimlane', 'org', 'relation', 'genogram', 'gantt', 'timeline', 'layers', 'quadrant']);
+    ['flow', 'swimlane', 'org', 'relation', 'genogram', 'gantt', 'timeline',
+      'layers', 'pyramid', 'quadrant']);
 });
 
 await t('每一種都有畫面要用的規格：名稱、用途、列名、欄位、範例、示意範本', () => {
@@ -542,6 +543,85 @@ await t('時間軸：每列幾個亂填時講一聲，不要整張圖不見', ()
     assert.match(out.warnings[0], /每列幾個事件/);
     assert.ok(words(out.svg).includes('甲'));
   });
+});
+
+/* ── 金字塔圖 ──────────────────────────────────────────────────────── */
+
+const pyramid = G.byId('pyramid');
+
+/** 每一層梯形的上下緣寬度（由上而下）。defs 裡的箭頭也是 polygon，只有三個點，要濾掉。 */
+const bands = (svg) => [...svg.matchAll(/<polygon points="([^"]+)"/g)]
+  .map((m) => m[1].split(' ').map((s) => s.split(',').map(Number)))
+  .filter((p) => p.length === 4)
+  .map((p) => ({ top: Math.abs(p[1][0] - p[0][0]), bottom: Math.abs(p[2][0] - p[3][0]) }));
+
+await t('金字塔：第一列畫在最上面，愈往下愈寬', () => {
+  const out = pyramid.build([{ name: '上' }, { name: '中' }, { name: '下' }], {}, {});
+  assert.equal(out.count, 3);
+  const w = bands(out.svg);
+  assert.equal(w.length, 3);
+  assert.ok(w[0].bottom < w[1].bottom && w[1].bottom < w[2].bottom, '沒有愈往下愈寬');
+  const txt = words(out.svg);
+  assert.ok(txt.indexOf('上') < txt.indexOf('下'), '第一列沒有畫在最上面');
+});
+
+await t('金字塔：倒過來就是上寬下窄的漏斗', () => {
+  const rows = [{ name: '上' }, { name: '中' }, { name: '下' }];
+  const w = bands(pyramid.build(rows, { shape: 'down' }, {}).svg);
+  assert.ok(w[0].bottom > w[1].bottom && w[1].bottom > w[2].bottom, '倒金字塔沒有愈往下愈窄');
+  rows.forEach((r) => assert.ok(words(pyramid.build(rows, { shape: 'down' }, {}).svg).includes(r.name)));
+});
+
+await t('金字塔：頂端不畫成一個尖點，不然第一層一個字都放不下', () => {
+  const w = bands(pyramid.build([{ name: '上' }, { name: '下' }], {}, {}).svg);
+  assert.ok(w[0].top > 20, '第一層的上緣是個尖點，字放不進去：' + w[0].top);
+});
+
+await t('金字塔：選依數量比例時，寬度照數量走', () => {
+  const out = pyramid.build([
+    { name: '報名', value: '1200' }, { name: '初審', value: '600' }, { name: '錄取', value: '300' }
+  ], { shape: 'value' }, {});
+  assert.equal(out.warnings.length, 0, out.warnings.join('／'));
+  const w = bands(out.svg);
+  /* 600 是 1200 的一半，寬度也要差不多是一半 */
+  assert.ok(Math.abs(w[1].top / w[0].top - 0.5) < 0.05,
+    '寬度沒有照數量比例：' + w[0].top + '／' + w[1].top);
+  assert.ok(w[2].top < w[1].top, '數量少的那層沒有比較細');
+});
+
+await t('金字塔：依數量比例但有人沒填數字時，講一聲並畫成一般的金字塔', () => {
+  const out = pyramid.build([
+    { name: '報名', value: '1200' }, { name: '初審', value: '' }
+  ], { shape: 'value' }, {});
+  assert.equal(out.count, 2);
+  assert.ok(out.warnings.some((w) => /「初審」.*沒有填數量/.test(w)), out.warnings.join('／'));
+  const w = bands(out.svg);
+  assert.ok(w[0].bottom < w[1].bottom, '沒有退回成一般的金字塔');
+});
+
+await t('金字塔：「1,200 人」這種也讀得出數字', () => {
+  const out = pyramid.build([
+    { name: '報名', value: '1,200 人' }, { name: '錄取', value: '６００人' }
+  ], { shape: 'value' }, {});
+  assert.equal(out.warnings.length, 0, out.warnings.join('／'));
+  assert.ok(words(out.svg).includes('1,200 人'), '數量沒有照使用者打的原樣顯示');
+});
+
+await t('金字塔：層名塞不進那一層就移到右邊，不要讓字凸出斜邊', () => {
+  const long = '國家政策與法制規劃及督導考核';
+  const out = pyramid.build([{ name: long }, { name: '甲' }, { name: '乙' }], {}, {});
+  assert.ok(words(out.svg).includes(long), '長層名不見了');
+  /* 移到右邊的那一段字是靠左排的，留在層裡面的是置中 */
+  const anchored = new RegExp('<text[^>]*text-anchor="middle"[^>]*>' + long + '<');
+  assert.equal(anchored.test(out.svg), false, '硬塞在層裡面了（字會凸出斜邊）');
+  /* 移到右邊的那一段是靠左排的：沒有 text-anchor，x 是右欄的位置 */
+  assert.match(out.svg, new RegExp('<text x="67[0-9]"[^>]*>' + long + '<'));
+});
+
+await t('金字塔：沒填層名但填了說明時講一聲，不要靜靜少畫一層', () => {
+  const out = pyramid.build([{ name: '甲' }, { name: '', note: '忘了填層名' }], {}, {});
+  assert.equal(out.count, 1);
+  assert.match(out.warnings[0], /第 2 列/);
 });
 
 /* ── 分層堆疊圖 ────────────────────────────────────────────────────── */
