@@ -782,7 +782,6 @@ await t('時間軸：切成橫式，事件就從「一列一個」變成一橫�
   await page.waitForTimeout(600);
   const zig = await page.evaluate(() => document.querySelector('#stage svg').textContent);
   assert.ok(zig.includes('三讀通過'), '切成上下交錯字就不見了');
-  assert.ok(zig.includes('沒有別的意思'), '交錯沒有在圖例講明上下不是分類');
 
   await page.locator('#m_timeline_dir').selectOption('down');
   await page.waitForTimeout(500);

@@ -464,12 +464,10 @@
       (major ? C.accent : C.muted) + '" stroke-width="1.6"/>';
   }
 
-  /* 交錯那句話一定要寫出來：上下分兩排看起來很像在分兩類（計畫／實際、本機關／他機關），
-     其實只是為了排得下。不講的話讀圖的人會自己腦補一個不存在的意思。 */
   var TL_ORDER_NOTE = {
     down: '由上而下依時間排列，間距等距',
     right: '由左而右依時間排列，間距等距',
-    zigzag: '由左而右依時間排列，上下交錯只是為了排得下，沒有別的意思'
+    zigzag: '由左而右依時間排列，間距等距'
   };
 
   function tlLegend(y, dir) {
@@ -480,17 +478,43 @@
     ]);
   }
 
-  /* 一列排幾個：使用者說了算，沒說就照「一格至少多寬」回推。
-     交錯時上下兩排錯開，一格佔的字寬是兩格，所以格子可以窄一半。 */
-  function tlPer(meta, warnings, count, usable, minSlot) {
+  /* 使用者自己說一列排幾個。看不懂就當他沒說，但要講一聲。 */
+  function tlCols(meta, warnings) {
     var raw = String((meta && meta.cols) || '').trim();
+    if (!raw) return 0;
     var want = parseInt(raw.replace(/[^\d]/g, ''), 10);
-    if (raw && !(want >= 1)) {
+    if (!(want >= 1)) {
       warnings.push('「橫式時每列幾個事件」要填一個 1 以上的數字，' +
         '填的是「' + raw + '」，先當成自動排。');
+      return 0;
     }
+    return want;
+  }
+
+  /* 一列排幾個：使用者說了算，沒說就照「一格至少多寬」回推。 */
+  function tlPer(meta, warnings, count, usable, minSlot) {
+    var want = tlCols(meta, warnings);
     if (want >= 1) return Math.min(want, 10);
     return Math.max(1, Math.min(count, Math.floor(usable / minSlot)));
+  }
+
+  /* 交錯的層數：事件一多就把上下拉得更開，讓同一條主軸吃得下更多事件。
+     一層＝上下各一排（相鄰兩格在線的兩邊）；兩層＝上下各兩排，同一邊的相鄰兩格
+     一近一遠，錯開之後格子可以再窄一半。再深下去字就剩四五個字寬，
+     一格要疊成一長條，反而不如換下一列，所以停在兩層。 */
+  var TL_ZIG = { lead: 16, gap: 10, minSlot: [100, 62], maxPer: 16 };
+
+  function tlZigPlan(meta, warnings, count, usable) {
+    var want = tlCols(meta, warnings), per;
+    if (want >= 1) {
+      per = Math.min(want, TL_ZIG.maxPer);
+    } else {
+      per = Math.max(1, Math.min(count, Math.floor(usable / TL_ZIG.minSlot[0])));
+      /* 一層排不完就加深一層再試——寧可字窄一點，也盡量排在同一條線上 */
+      if (count > per) per = Math.max(1, Math.min(count, Math.floor(usable / TL_ZIG.minSlot[1])));
+    }
+    var slotW = usable / per;
+    return { per: per, slotW: slotW, lv: slotW >= TL_ZIG.minSlot[0] ? 1 : 2 };
   }
 
   /* 交錯版的一格：日期貼著主軸，事件與說明往外長。
@@ -634,45 +658,58 @@
   }
 
   /* 交錯：一條主軸，點輪流往上、往下拉開。
-     好處是一格的字可以佔到兩格寬（左右鄰居在線的另一邊），同樣一條線塞得下的
-     事件多一倍；代價是上下兩排看起來像兩類，所以圖例要講明白沒有那個意思。 */
-  var TL_LEAD = 16;
-
+     好處是相鄰的兩格在線的不同邊，字排得到約兩格寬，同一條線塞得下的事件多一倍；
+     事件再多就把上下拉成兩層（同一邊也分遠近），格子還能再窄一半。 */
   function tlZig(evts, meta, warnings) {
     var usable = W - TL.left * 2;
-    var per = tlPer(meta, warnings, evts.length, usable, 100);
-    var slotW = usable / per;
-    /* 相鄰的兩格在線的不同邊，所以字排得到兩格寬；邊上的那一格只剩一格半，
-       取 1.8 格是兩者之間的折衷，排到紙邊外面比擠在一起更難救。 */
-    var inner = Math.max(slotW - 18, slotW * 1.8 - 24);
+    var plan = tlZigPlan(meta, warnings, evts.length, usable);
+    var per = plan.per, slotW = plan.slotW;
+    /* 字最寬只能到兩格：同一邊的鄰居在兩格外，再寬就會壓到它的引線。
+       頭尾那兩格還要另外壓一次——它們的中心離紙邊只有半格，
+       照兩格寬排會直接排到畫布外面去。 */
+    var inner = Math.max(slotW - 18, Math.min(slotW * 2 - 20, slotW + 40));
 
     var lines = [], cur = [];
     evts.forEach(function (e, i) {
       if (i && cur.length >= per) { lines.push(cur); cur = []; }
+      var j = cur.length;
       var c = {
         e: e,
         dl: tlDateLines(e.label, inner / TL.dateSize),
         tl: DD.wrapLabel(e.title, inner / TL.titleSize),
         nl: e.note ? DD.wrapLabel(e.note, inner / TL.noteSize) : []
       };
-      /* 第幾個決定在線的上面還是下面：偶數在下、奇數在上。
-         每一列都重新從「下」開始，不然列數一多就看不出規律。 */
-      c.up = cur.length % 2 === 1;
+      /* 第幾個決定在線的哪一邊、第幾層：偶數在下、奇數在上；
+         兩層時每兩個換一次遠近。每一列都重新從「下、近」開始，
+         不然列數一多就看不出規律。 */
+      c.up = j % 2 === 1;
+      c.lv = plan.lv === 1 ? 0 : Math.floor(j / 2) % 2;
       c.block = tlBlock(c);
+      c.h = tlBlockH(c.block);
       cur.push(c);
     });
     if (cur.length) lines.push(cur);
 
     var y = TL.top;
     lines.forEach(function (row) {
-      var up = 0, down = 0;
+      /* 每一列各自算四組（上下 × 遠近）的高度，同一組的字才對得齊 */
+      var band = [[0, 0], [0, 0]];
       row.forEach(function (c) {
-        var h = tlBlockH(c.block);
-        if (c.up) up = Math.max(up, h); else down = Math.max(down, h);
+        var side = c.up ? 1 : 0;
+        if (c.h > band[side][c.lv]) band[side][c.lv] = c.h;
       });
-      row.up = up;
-      row.axisY = y + up + TL_LEAD;
-      row.h = up + TL_LEAD * 2 + down + 30;
+      row.band = band;
+      /* 每一組離主軸多遠：近的那層貼著引線長，遠的那層再讓開近的那層 */
+      row.start = band.map(function (b) {
+        return [TL_ZIG.lead, TL_ZIG.lead + b[0] + TL_ZIG.gap];
+      });
+      var ext = band.map(function (b, side) {
+        if (b[1]) return row.start[side][1] + b[1];
+        if (b[0]) return TL_ZIG.lead + b[0];
+        return 0;
+      });
+      row.axisY = y + ext[1];
+      row.h = ext[0] + ext[1] + 30;
       y += row.h;
     });
     var H = y + 46;
@@ -687,13 +724,16 @@
         '" stroke="rgba(45,49,66,0.18)" stroke-width="1.4"/>');
       row.forEach(function (c, i) {
         var cx = cxOf(i), e = c.e;
-        var h = tlBlockH(c.block);
-        /* 上排的字往上頂齊，日期才會跟同一排的其他格對在同一條水平線上；
-           字少的那一格離主軸遠一點沒關係，引線會把它接回去。 */
-        var top = c.up ? row.axisY - TL_LEAD - row.up : row.axisY + TL_LEAD;
-        /* 引線：從圓點拉到那一格的字，不然上下兩排對不出哪個字是哪個點的 */
+        var side = c.up ? 1 : 0;
+        var start = row.start[side][c.lv];
+        /* 同一組的字往主軸的反方向頂齊：上排往上頂、下排往下頂，
+           日期才會跟同一組的其他格對在同一條水平線上。 */
+        var far = start + row.band[side][c.lv];
+        var top = c.up ? row.axisY - far : row.axisY + far - c.h;
+        /* 引線：從圓點拉到那一格的字。遠的那一層要穿過近的那一層，
+           但字最寬只有兩格、同一邊的鄰居在兩格外，所以不會壓到字。 */
         out.push('<line x1="' + r1(cx) + '" y1="' + r1(row.axisY + (c.up ? -6 : 6)) +
-          '" x2="' + r1(cx) + '" y2="' + r1(c.up ? top + h : top) +
+          '" x2="' + r1(cx) + '" y2="' + r1(c.up ? top + c.h : top) +
           '" stroke="' + (e.major ? C.accent : 'rgba(45,49,66,0.28)') + '" stroke-width="1"/>');
         out.push(tlDot(cx, row.axisY, e.major));
         var ty = top;
@@ -726,7 +766,7 @@
       '一段期間就打「114/2～114/6」，兩頭都看得懂的話會排成民國年的起訖。',
       '直式是由上而下排；橫式是由左而右排，排滿一列換下一列。',
       '事件多又想排成一條線，就選「橫式（上下交錯）」：點會輪流往上下拉開，' +
-        '一條線塞得下的事件多一倍，上下沒有別的意思。',
+        '事件愈多拉得愈開，一條主軸最多排得下十四件。',
       '由時間先後等距排列，不照日期間隔拉開——沿革要好讀，要按比例請改用甘特圖。'
     ],
     rowName: '事件',

@@ -293,7 +293,7 @@ vendor/upstream/         上游範例圖的原樣副本＋LICENSE＋SOURCE.json�
 
 | 指令 | 內容 |
 |---|---|
-| `npm test` | 全部：`core.unit`（166）＋`gen.unit`（113）＋`board.unit`（38）＋`data`（25）＋`e2e`（126），約 4 分鐘 |
+| `npm test` | 全部：`core.unit`（166）＋`gen.unit`（114）＋`board.unit`（38）＋`data`（25）＋`e2e`（126），約 4 分鐘 |
 | `npm run test:unit` | 純函式＋資料一致性，約 3 秒 |
 | `npm run test:e2e` | 真的開 Chromium 點按鈕、真的下載檔案 |
 | `npm run build` | 重新產生 `data/diagrams.json` |

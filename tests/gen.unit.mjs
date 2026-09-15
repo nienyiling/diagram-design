@@ -424,7 +424,8 @@ await t('時間軸：上下交錯時，相鄰的兩個事件一個在線上、�
 
 await t('時間軸：上下交錯是為了一條線塞得下更多事件，所以同樣的事件排得比較少列', () => {
   const rows = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ date: '114/' + n, title: '第' + n + '件' }));
-  const axes = (svg) => (svg.match(/<line x1="[\d.]+" y1="([\d.]+)" x2="[\d.]+" y2="\1"/g) || []).length;
+  const axes = (svg) =>
+    (svg.match(/stroke="rgba\(45,49,66,0\.18\)" stroke-width="1\.4"/g) || []).length;
   const flat = timeline.build(rows, { dir: 'right' }, {}).svg;
   const zig = timeline.build(rows, { dir: 'zigzag' }, {}).svg;
   assert.ok(axes(zig) < axes(flat), '交錯沒有比較省列：' + axes(zig) + ' vs ' + axes(flat));
@@ -432,11 +433,37 @@ await t('時間軸：上下交錯是為了一條線塞得下更多事件，所�
   rows.forEach((r) => assert.ok(words(zig).includes(r.title), r.title + ' 不見了'));
 });
 
-await t('時間軸：交錯的上下不代表分類，圖例要講出來', () => {
-  const zig = timeline.build([{ date: '114/1', title: '甲' }], { dir: 'zigzag' }, {}).svg;
-  assert.ok(words(zig).includes('沒有別的意思'), words(zig));
-  const flat = timeline.build([{ date: '114/1', title: '甲' }], { dir: 'right' }, {}).svg;
-  assert.ok(!words(flat).includes('沒有別的意思'));
+await t('時間軸：事件再多就把上下拉成兩層，盡量排在同一條主軸上', () => {
+  const rows = (n) => Array.from({ length: n }, (_, i) =>
+    ({ date: '114/' + (i % 12 + 1), title: '第' + (i + 1) + '件' }));
+  const y = (svg, name) => +new RegExp('<text x="[\\d.]+" y="([\\d.]+)"[^>]*>' + name + '<')
+    .exec(svg)[1];
+  /* 主軸是那條 1.4 粗的淡線，圖例的分隔線比它細，不要一起數進來 */
+  const axes = (svg) =>
+    (svg.match(/stroke="rgba\(45,49,66,0\.18\)" stroke-width="1\.4"/g) || []).length;
+
+  /* 六件：一層就排得下，同一邊的相鄰兩格離主軸一樣遠 */
+  const few = timeline.build(rows(6), { dir: 'zigzag' }, {}).svg;
+  assert.equal(axes(few), 1, '六件沒有排在同一條主軸上');
+  assert.equal(y(few, '第1件'), y(few, '第3件'), '一層時同一邊的兩格沒有對齊');
+
+  /* 十四件：一層排不下，改成上下各兩層，同一邊的相鄰兩格一近一遠 */
+  const many = timeline.build(rows(14), { dir: 'zigzag' }, {}).svg;
+  assert.equal(axes(many), 1, '十四件沒有排在同一條主軸上，等於沒有加深');
+  assert.ok(y(many, '第3件') > y(many, '第1件'), '十四件時同一邊的兩格沒有拉開遠近');
+  assert.equal(y(many, '第1件'), y(many, '第5件'), '同一層的兩格沒有對齊');
+  rows(14).forEach((r) => assert.ok(words(many).includes(r.title), r.title + ' 不見了'));
+});
+
+await t('時間軸：交錯時字再寬也不會排到畫布外面', () => {
+  const rows = [1, 2, 3].map((n) => ({ date: '114/' + n, title: '很長的事件名稱'.repeat(3) }));
+  const svg = timeline.build(rows, { dir: 'zigzag' }, {}).svg;
+  /* 頭尾兩格的中心離紙邊只有半格，字寬照兩格排會排出去 */
+  const xs = [...svg.matchAll(/<text x="([\d.]+)"[^>]*>([^<]*)</g)]
+    .filter((m) => m[2].indexOf('很長') === 0)
+    .map((m) => +m[1]);
+  assert.ok(xs.length >= 3, '事件名稱沒畫出來');
+  xs.forEach((x) => assert.ok(x > 40 && x < 960, '字的中心跑到畫布邊上了：' + x));
 });
 
 await t('時間軸：每列幾個亂填時講一聲，不要整張圖不見', () => {
