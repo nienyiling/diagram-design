@@ -409,6 +409,11 @@
     { value: 'zigzag', label: '橫式（上下交錯）' }
   ];
 
+  var TL_GAP_OPTIONS = [
+    { value: 'even', label: '等距（好讀）' },
+    { value: 'time', label: '依日期間隔（照時間遠近）' }
+  ];
+
   var TL = {
     spineX: 250, top: 62, left: 60,
     rowMin: 64, lineH: 19, noteH: 15, dateH: 15,
@@ -441,21 +446,22 @@
 
   function tlOne(raw) {
     var dt = parseTwDate(raw);
-    return dt ? twLabel(dt, tlHasDay(raw)) : null;
+    return dt ? { label: twLabel(dt, tlHasDay(raw)), day: dayNum(dt) } : null;
   }
 
+  /* day 是「照日期間隔排」用的天數；一段期間用起日，看不懂的就沒有天數。 */
   function tlDate(raw) {
     var s = String(raw == null ? '' : raw).trim();
-    if (!s) return { label: '', ok: true };
+    if (!s) return { label: '', ok: true, day: null };
     var one = tlOne(s);
-    if (one) return { label: one, ok: true };
+    if (one) return { label: one.label, ok: true, day: one.day };
     for (var i = 0; i < TL_RANGE_SEPS.length; i++) {
       var parts = s.split(TL_RANGE_SEPS[i]);
       if (parts.length !== 2) continue;
       var a = tlOne(parts[0]), b = tlOne(parts[1]);
-      if (a && b) return { label: a + '～' + b, ok: true };
+      if (a && b) return { label: a.label + '～' + b.label, ok: true, day: a.day };
     }
-    return { label: s, ok: false };
+    return { label: s, ok: false, day: null };
   }
 
   function tlDot(cx, cy, major) {
@@ -464,18 +470,71 @@
       (major ? C.accent : C.muted) + '" stroke-width="1.6"/>';
   }
 
-  var TL_ORDER_NOTE = {
-    down: '由上而下依時間排列，間距等距',
-    right: '由左而右依時間排列，間距等距',
-    zigzag: '由左而右依時間排列，間距等距'
-  };
-
-  function tlLegend(y, dir) {
+  function tlLegend(y, dir, timed) {
+    var way = dir === 'down' ? '由上而下' : '由左而右';
     return legend(y, [
       { name: '事件', mark: function (x, yy) { return tlDot(x + 12, yy, false); } },
       { name: '重要里程碑', mark: function (x, yy) { return tlDot(x + 12, yy, true); } },
-      { name: TL_ORDER_NOTE[dir] || TL_ORDER_NOTE.down, mark: function () { return ''; } }
+      { name: way + '依時間排列，' + (timed ? '間距照日期遠近' : '間距等距'),
+        mark: function () { return ''; } }
     ]);
+  }
+
+  /* ── 依日期間隔排 ────────────────────────────────────────────────
+     純按比例會壞掉：同一個月的兩件疊在一起，隔兩年的那一段佔掉整張圖。
+     所以每一段先給一個「最少要多寬」，剩下的空間再照天數比例分下去。
+     時間一樣近的兩段就分到一樣多，差很多的那一段才會明顯拉開。 */
+
+  function tlSpread(dts, mins, total) {
+    var sumMin = 0, sumDt = 0, i;
+    for (i = 0; i < dts.length; i++) { sumMin += mins[i]; sumDt += dts[i]; }
+    var free = total - sumMin;
+    if (!(free > 0) || !(sumDt > 0)) return mins.slice();
+    return mins.map(function (m, k) { return m + free * dts[k] / sumDt; });
+  }
+
+  /** 每一段的天數差；排不出先後（有一列日期看不懂、只有一件、全同一天）就回 null。 */
+  function tlTimes(evts, warnings) {
+    if (evts.length < 2) return null;
+    var bad = null;
+    evts.forEach(function (e) { if (!bad && e.day == null) bad = e; });
+    if (bad) {
+      warnings.push('「' + bad.title + '」的日期排不出先後，照日期間隔算不出來，先用等距排。');
+      return null;
+    }
+    var i, back = false;
+    for (i = 1; i < evts.length; i++) if (evts[i].day < evts[i - 1].day) back = true;
+    if (back) {
+      evts.sort(function (a, b) { return a.day - b.day; });
+      warnings.push('有事件的日期比前一列早，照日期間隔排會前後顛倒，已經依日期重排。');
+    }
+    var dts = [], sum = 0;
+    for (i = 1; i < evts.length; i++) {
+      dts.push(evts[i].day - evts[i - 1].day);
+      sum += dts[i - 1];
+    }
+    return sum > 0 ? dts : null;
+  }
+
+  /** 橫著排時每個點的 x：每段至少 minGap，剩下的寬度照天數比例分。 */
+  function tlTimeX(dts, minGap, x0, x1) {
+    var mins = dts.map(function () { return minGap; });
+    var gaps = tlSpread(dts, mins, x1 - x0);
+    var xs = [x0];
+    gaps.forEach(function (g) { xs.push(xs[xs.length - 1] + g); });
+    return xs;
+  }
+
+  /** 這一格的字排得到多寬：看同一排的鄰居（隔 step 個）離多遠，再壓一次紙邊。 */
+  function tlRoomAt(xs, i, step, pad) {
+    var room = 0;
+    if (i - step >= 0) room = xs[i] - xs[i - step];
+    if (i + step < xs.length) {
+      var r = xs[i + step] - xs[i];
+      room = room ? Math.min(room, r) : r;
+    }
+    if (!room) room = W;
+    return Math.max(44, Math.min(room - pad, 2 * Math.min(xs[i] - 40, W - 40 - xs[i])));
   }
 
   /* 使用者自己說一列排幾個。看不懂就當他沒說，但要講一聲。 */
@@ -503,6 +562,11 @@
      一近一遠，錯開之後格子可以再窄一半。再深下去字就剩四五個字寬，
      一格要疊成一長條，反而不如換下一列，所以停在兩層。 */
   var TL_ZIG = { lead: 16, gap: 10, minSlot: [100, 62], maxPer: 16 };
+
+  /* 照日期間隔排時，兩個點最少要離多遠（不然日期會疊在一起），
+     以及頭尾兩個點要離紙邊多遠（它們的字是置中的，要留半邊出來）。 */
+  var TL_MIN_GAP = { right: 96, zigzag: 46 };
+  var TL_EDGE = 45;
 
   function tlZigPlan(meta, warnings, count, usable) {
     var want = tlCols(meta, warnings), per;
@@ -533,7 +597,7 @@
   }
 
   /* 直式：一條直線在左，事件由上而下。列高隨字數長，字多的列不會被切掉。 */
-  function tlDown(evts) {
+  function tlDown(evts, dts) {
     var textX = TL.spineX + 22;
     var wide = (W - 40) - textX;
     var laid = evts.map(function (e) {
@@ -545,7 +609,16 @@
       };
     });
     var cy = TL.top + 12;
-    laid.forEach(function (r) { r.cy = cy; cy += r.h; });
+    if (dts) {
+      /* 每一列至少要讓得下自己的字（不然下一列的字會疊上來），
+         多出來的高度才照天數比例分。整張圖跟著長高，直式不必怕排不下。 */
+      var mins = laid.slice(0, -1).map(function (r) { return r.h; });
+      var room = mins.reduce(function (a, b) { return a + b; }, 0) + 30 * mins.length;
+      var gaps = tlSpread(dts, mins, room);
+      laid.forEach(function (r, i) { r.cy = cy; cy += gaps[i] || 0; });
+    } else {
+      laid.forEach(function (r) { r.cy = cy; cy += r.h; });
+    }
     var last = laid[laid.length - 1];
     var H = last.cy + last.h + 74;
 
@@ -577,27 +650,42 @@
       });
     });
 
-    out.push(tlLegend(H - 58, 'down'));
+    out.push(tlLegend(H - 58, 'down', !!dts));
     out.push('</svg>');
     return out.join('');
   }
 
   /* 橫式：一條橫線是一列，事件由左而右；排滿了就換到下一列（跟關係圖同一套規矩）。
      日期在線上方、事件與說明在線下方，字照格子寬度折行。 */
-  function tlAcross(evts, meta, warnings) {
+  function tlAcross(evts, meta, warnings, dts) {
     var usable = W - TL.left * 2;
-    var per = tlPer(meta, warnings, evts.length, usable, 150);
+    var xs = null;
+    if (dts) {
+      /* 照日期間隔就不換列了——分成兩列的話「比例」在第二列會重新算，看不出遠近。
+         擠不下時寧可退回等距，也不要把兩件疊在一起。 */
+      var span = usable - TL_EDGE * 2;
+      if (span < dts.length * TL_MIN_GAP.right) {
+        warnings.push('事件太多，橫式照日期間隔排會擠成一團，先用等距排；' +
+          '改成「橫式（上下交錯）」或直式排得下比較多。');
+        dts = null;
+      } else {
+        xs = tlTimeX(dts, TL_MIN_GAP.right, TL.left + TL_EDGE, W - TL.left - TL_EDGE);
+      }
+    }
+    var per = xs ? evts.length : tlPer(meta, warnings, evts.length, usable, 150);
     var slotW = usable / per;
     var inner = slotW - 18;
 
     var lines = [], cur = [];
     evts.forEach(function (e, i) {
       if (i && cur.length >= per) { lines.push(cur); cur = []; }
+      var wide = xs ? tlRoomAt(xs, i, 1, 18) : inner;
       cur.push({
         e: e,
-        dl: tlDateLines(e.label, inner / TL.dateSize),
-        tl: DD.wrapLabel(e.title, inner / TL.titleSize),
-        nl: e.note ? DD.wrapLabel(e.note, inner / TL.noteSize) : []
+        cx: xs ? xs[i] : null,
+        dl: tlDateLines(e.label, wide / TL.dateSize),
+        tl: DD.wrapLabel(e.title, wide / TL.titleSize),
+        nl: e.note ? DD.wrapLabel(e.note, wide / TL.noteSize) : []
       });
     });
     if (cur.length) lines.push(cur);
@@ -616,7 +704,9 @@
 
     var out = [canvasOpen(H, '時間軸')];
     lines.forEach(function (row, n) {
-      var cxOf = function (i) { return TL.left + slotW * i + slotW / 2; };
+      var cxOf = function (i) {
+        return row[i].cx == null ? TL.left + slotW * i + slotW / 2 : row[i].cx;
+      };
       /* 換列時線要拉到紙邊、下一列再從紙邊接回來，像文字折行那樣——
          線停在最後一個圓點上的話，看不出下一列是接續的還是另一條時間軸。 */
       var x1 = n === 0 ? cxOf(0) : TL.left;
@@ -652,7 +742,7 @@
       });
     });
 
-    out.push(tlLegend(H - 58, 'right'));
+    out.push(tlLegend(H - 58, 'right', !!xs));
     out.push('</svg>');
     return out.join('');
   }
@@ -660,9 +750,22 @@
   /* 交錯：一條主軸，點輪流往上、往下拉開。
      好處是相鄰的兩格在線的不同邊，字排得到約兩格寬，同一條線塞得下的事件多一倍；
      事件再多就把上下拉成兩層（同一邊也分遠近），格子還能再窄一半。 */
-  function tlZig(evts, meta, warnings) {
+  function tlZig(evts, meta, warnings, dts) {
     var usable = W - TL.left * 2;
-    var plan = tlZigPlan(meta, warnings, evts.length, usable);
+    var xs = null;
+    if (dts) {
+      var span = usable - TL_EDGE * 2;
+      if (span < dts.length * TL_MIN_GAP.zigzag) {
+        warnings.push('事件太多，橫著照日期間隔排會擠成一團，先用等距排；' +
+          '改成直式的話高度可以一直長下去，排得下。');
+        dts = null;
+      } else {
+        xs = tlTimeX(dts, TL_MIN_GAP.zigzag, TL.left + TL_EDGE, W - TL.left - TL_EDGE);
+      }
+    }
+    var plan = xs
+      ? { per: evts.length, slotW: usable / evts.length, lv: evts.length > 8 ? 2 : 1 }
+      : tlZigPlan(meta, warnings, evts.length, usable);
     var per = plan.per, slotW = plan.slotW;
     /* 字最寬只能到兩格：同一邊的鄰居在兩格外，再寬就會壓到它的引線。
        頭尾那兩格還要另外壓一次——它們的中心離紙邊只有半格，
@@ -673,11 +776,14 @@
     evts.forEach(function (e, i) {
       if (i && cur.length >= per) { lines.push(cur); cur = []; }
       var j = cur.length;
+      /* 照日期間隔時，同一邊的鄰居不再是固定的兩格，要看實際隔多遠 */
+      var wide = xs ? tlRoomAt(xs, i, 2, 20) : inner;
       var c = {
         e: e,
-        dl: tlDateLines(e.label, inner / TL.dateSize),
-        tl: DD.wrapLabel(e.title, inner / TL.titleSize),
-        nl: e.note ? DD.wrapLabel(e.note, inner / TL.noteSize) : []
+        cx: xs ? xs[i] : null,
+        dl: tlDateLines(e.label, wide / TL.dateSize),
+        tl: DD.wrapLabel(e.title, wide / TL.titleSize),
+        nl: e.note ? DD.wrapLabel(e.note, wide / TL.noteSize) : []
       };
       /* 第幾個決定在線的哪一邊、第幾層：偶數在下、奇數在上；
          兩層時每兩個換一次遠近。每一列都重新從「下、近」開始，
@@ -716,7 +822,9 @@
 
     var out = [canvasOpen(H, '時間軸')];
     lines.forEach(function (row, n) {
-      var cxOf = function (i) { return TL.left + slotW * i + slotW / 2; };
+      var cxOf = function (i) {
+        return row[i].cx == null ? TL.left + slotW * i + slotW / 2 : row[i].cx;
+      };
       var x1 = n === 0 ? cxOf(0) : TL.left;
       var x2 = n === lines.length - 1 ? cxOf(row.length - 1) : W - TL.left;
       out.push('<line x1="' + r1(x1) + '" y1="' + r1(row.axisY) + '" x2="' +
@@ -750,7 +858,7 @@
       });
     });
 
-    out.push(tlLegend(H - 58, 'zigzag'));
+    out.push(tlLegend(H - 58, 'zigzag', !!xs));
     out.push('</svg>');
     return out.join('');
   }
@@ -767,7 +875,9 @@
       '直式是由上而下排；橫式是由左而右排，排滿一列換下一列。',
       '事件多又想排成一條線，就選「橫式（上下交錯）」：點會輪流往上下拉開，' +
         '事件愈多拉得愈開，一條主軸最多排得下十四件。',
-      '由時間先後等距排列，不照日期間隔拉開——沿革要好讀，要按比例請改用甘特圖。'
+      '「點的間距」預設等距，好讀；改成「依日期間隔」就會照日期遠近拉開，' +
+        '同一個月的兩件靠在一起，隔兩年的那一段拉開，但每一段還是留得下字。',
+      '有一件的日期看不懂、或事件多到擠不下時，會自己退回等距並講一聲。'
     ],
     rowName: '事件',
     fields: [
@@ -779,6 +889,7 @@
     ],
     meta: [
       { key: 'dir', label: '排列方向', type: 'select', options: TL_DIR_OPTIONS, width: '190px' },
+      { key: 'gap', label: '點的間距', type: 'select', options: TL_GAP_OPTIONS, width: '230px' },
       { key: 'cols', label: '橫式時每列幾個事件，留空＝自動', type: 'text', width: '250px' }
     ],
     example: [
@@ -792,6 +903,7 @@
       var warnings = [];
       var m = meta || {};
       var dir = optValue(TL_DIR_OPTIONS, m.dir);
+      var byTime = optValue(TL_GAP_OPTIONS, m.gap) === 'time';
       var evts = [];
       (rows || []).forEach(function (row, i) {
         var title = String(row.title || '').trim();
@@ -801,7 +913,7 @@
         var d = tlDate(raw);
         if (raw && !d.ok) warnings.push('「' + title + '」的日期「' + raw + '」看不懂，先用原文顯示。');
         evts.push({
-          label: d.label, title: title,
+          label: d.label, title: title, day: d.day,
           note: String(row.note || '').trim(), major: !!row.major
         });
       });
@@ -810,9 +922,10 @@
         return { svg: emptyCanvas('在左邊填日期與事件，這裡就會出現時間軸'), warnings: warnings, count: 0 };
       }
 
-      var svg = dir === 'right' ? tlAcross(evts, m, warnings)
-        : dir === 'zigzag' ? tlZig(evts, m, warnings)
-          : tlDown(evts);
+      var dts = byTime ? tlTimes(evts, warnings) : null;
+      var svg = dir === 'right' ? tlAcross(evts, m, warnings, dts)
+        : dir === 'zigzag' ? tlZig(evts, m, warnings, dts)
+          : tlDown(evts, dts);
       return { svg: svg, warnings: warnings, count: evts.length };
     }
   };

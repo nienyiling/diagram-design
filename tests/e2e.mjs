@@ -783,6 +783,14 @@ await t('時間軸：切成橫式，事件就從「一列一個」變成一橫�
   const zig = await page.evaluate(() => document.querySelector('#stage svg').textContent);
   assert.ok(zig.includes('三讀通過'), '切成上下交錯字就不見了');
 
+  await page.locator('#m_timeline_gap').selectOption('time');
+  await page.waitForTimeout(600);
+  const timed = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(timed.includes('照日期遠近'), '切成依日期間隔，圖例沒有跟著改');
+  assert.ok(timed.includes('三讀通過'), '切成依日期間隔字就不見了');
+  await page.locator('#m_timeline_gap').selectOption('even');
+  await page.waitForTimeout(500);
+
   await page.locator('#m_timeline_dir').selectOption('down');
   await page.waitForTimeout(500);
 });

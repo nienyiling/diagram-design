@@ -466,6 +466,75 @@ await t('時間軸：交錯時字再寬也不會排到畫布外面', () => {
   xs.forEach((x) => assert.ok(x > 40 && x < 960, '字的中心跑到畫布邊上了：' + x));
 });
 
+await t('時間軸：改成依日期間隔，日期差得多的那一段點就離得遠', () => {
+  /* 三件：前兩件差 14 天，後面差兩年 */
+  const rows = [
+    { date: '114/1/1', title: '甲' }, { date: '114/1/15', title: '乙' },
+    { date: '116/1/15', title: '丙' }
+  ];
+  const cys = (svg) => [...svg.matchAll(/<circle cx="([\d.]+)" cy="([\d.]+)" r="[47]/g)];
+  const gapsOf = (svg, axis) => {
+    const v = cys(svg).map((m) => +m[axis]);
+    return [v[1] - v[0], v[2] - v[1]];
+  };
+  ['down', 'right', 'zigzag'].forEach((dir) => {
+    const even = timeline.build(rows, { dir: dir }, {});
+    const time = timeline.build(rows, { dir: dir, gap: 'time' }, {});
+    assert.equal(time.warnings.length, 0, dir + '：' + time.warnings.join('／'));
+    const axis = dir === 'down' ? 2 : 1;
+    const [a, b] = gapsOf(even.svg, axis);
+    assert.ok(Math.abs(a - b) < 1, dir + '：等距卻沒有等距（' + a + '／' + b + '）');
+    const [c, d] = gapsOf(time.svg, axis);
+    assert.ok(d > c * 1.5, dir + '：兩年的那一段沒有拉得比兩週遠（' + c + '／' + d + '）');
+    assert.ok(c > 0, dir + '：靠得近的兩件疊在一起了');
+  });
+});
+
+await t('時間軸：依日期間隔時，日期看不懂就退回等距並講一聲', () => {
+  const out = timeline.build([
+    { date: '114/1', title: '甲' }, { date: '114 年上半年', title: '乙' },
+    { date: '115/1', title: '丙' }
+  ], { gap: 'time' }, {});
+  assert.equal(out.count, 3);
+  assert.ok(out.warnings.some((w) => /「乙」.*排不出先後/.test(w)), out.warnings.join('／'));
+  assert.ok(words(out.svg).includes('間距等距'), '退回等距了，圖例卻還說照日期');
+});
+
+await t('時間軸：依日期間隔時，日期前後顛倒會依日期重排並講一聲', () => {
+  const out = timeline.build([
+    { date: '115/1', title: '晚的' }, { date: '114/1', title: '早的' }
+  ], { gap: 'time' }, {});
+  const svg = words(out.svg);
+  assert.ok(svg.indexOf('早的') < svg.indexOf('晚的'), '沒有依日期重排');
+  assert.ok(out.warnings.some((w) => /依日期重排/.test(w)), out.warnings.join('／'));
+  /* 等距時不重排：使用者填的順序就是他要的順序 */
+  const asIs = words(timeline.build([
+    { date: '115/1', title: '晚的' }, { date: '114/1', title: '早的' }
+  ], {}, {}).svg);
+  assert.ok(asIs.indexOf('晚的') < asIs.indexOf('早的'), '等距卻自己重排了');
+});
+
+await t('時間軸：依日期間隔擠不下時退回等距，並說得出改哪裡就排得下', () => {
+  const rows = Array.from({ length: 12 }, (_, i) =>
+    ({ date: '114/' + (i % 12 + 1) + '/1', title: '第' + (i + 1) + '件' }));
+  const out = timeline.build(rows, { dir: 'right', gap: 'time' }, {});
+  assert.equal(out.count, 12);
+  assert.match(out.warnings[0], /擠成一團.*上下交錯|擠成一團.*直式/);
+  rows.forEach((r) => assert.ok(words(out.svg).includes(r.title), r.title + ' 不見了'));
+  /* 交錯排得下，就不該退回 */
+  const zig = timeline.build(rows, { dir: 'zigzag', gap: 'time' }, {});
+  assert.equal(zig.warnings.length, 0, zig.warnings.join('／'));
+});
+
+await t('時間軸：依日期間隔時，全部同一天就跟等距一樣，不要除以零', () => {
+  const rows = [1, 2, 3].map((n) => ({ date: '114/5/5', title: '第' + n + '件' }));
+  const out = timeline.build(rows, { gap: 'time' }, {});
+  assert.equal(out.count, 3);
+  assert.equal(out.warnings.length, 0);
+  const cy = [...out.svg.matchAll(/<circle cx="[\d.]+" cy="([\d.]+)" r="[47]/g)].map((m) => +m[1]);
+  assert.ok(Math.abs((cy[1] - cy[0]) - (cy[2] - cy[1])) < 1, '同一天卻排得一遠一近');
+});
+
 await t('時間軸：每列幾個亂填時講一聲，不要整張圖不見', () => {
   ['right', 'zigzag'].forEach((dir) => {
     const out = timeline.build([{ date: '114/1', title: '甲' }], { dir: dir, cols: '很多' }, {});
