@@ -403,17 +403,218 @@
      直式：日期在左、事件在右、中間一條脊線。中文標籤橫著排會擠成一團，
      直式才印得下 A4，而且沿革通常就是一條一條往下讀。 */
 
-  var TL = { spineX: 250, top: 60, rowH: 74 };
+  var TL_DIR_OPTIONS = [
+    { value: 'down', label: '直式（由上而下）' },
+    { value: 'right', label: '橫式（由左而右）' }
+  ];
+
+  var TL = {
+    spineX: 250, top: 62, left: 60,
+    rowMin: 64, lineH: 19, noteH: 15, dateH: 15,
+    titleSize: 14, noteSize: 10, dateSize: 11
+  };
+
+  /* 橫式的日期擺在格子正上方，一段起訖排不下就在「～」那裡斷成兩行——
+     日期是靠右（直式）或置中（橫式）對齊的，縮字級會跟旁邊的格子對不齊。 */
+  function tlDateLines(label, maxUnits) {
+    if (!label) return [];
+    if (!(maxUnits > 0) || DD.textUnits(label) <= maxUnits) return [label];
+    var at = label.indexOf('～');
+    if (at > 0) return [label.slice(0, at + 1), label.slice(at + 1)];
+    return [label];
+  }
+
+  /* 起訖日：「114/2～114/6」這種要看得懂，不能整串當成看不懂的字丟回去。
+     只認得明確的範圍符號；「-」要兩邊都各自解得出日期才算，
+     不然 114-3-5 會被拆成三段，單一日期反而壞掉。 */
+  var TL_RANGE_SEPS = ['～', '~', '〜', '–', '—', '至', '到', '-'];
+
+  /* 使用者打了「日」就要看到「日」。parseTwDate 把 114/3 補成 3 月 1 日，
+     解完之後分不出「他只打到月」還是「他打了 1 號」，所以回頭看原字串。 */
+  function tlHasDay(raw) {
+    var s = String(raw == null ? '' : raw).trim()
+      .replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 65248); })
+      .replace(/^民國/, '').replace(/\s/g, '');
+    return /^\d{7,8}$/.test(s) || /^\d{1,4}[年./-]\d{1,2}[月./-]\d{1,2}日?$/.test(s);
+  }
+
+  function tlOne(raw) {
+    var dt = parseTwDate(raw);
+    return dt ? twLabel(dt, tlHasDay(raw)) : null;
+  }
+
+  function tlDate(raw) {
+    var s = String(raw == null ? '' : raw).trim();
+    if (!s) return { label: '', ok: true };
+    var one = tlOne(s);
+    if (one) return { label: one, ok: true };
+    for (var i = 0; i < TL_RANGE_SEPS.length; i++) {
+      var parts = s.split(TL_RANGE_SEPS[i]);
+      if (parts.length !== 2) continue;
+      var a = tlOne(parts[0]), b = tlOne(parts[1]);
+      if (a && b) return { label: a + '～' + b, ok: true };
+    }
+    return { label: s, ok: false };
+  }
+
+  function tlDot(cx, cy, major) {
+    return '<circle cx="' + r1(cx) + '" cy="' + r1(cy) + '" r="' + (major ? 7 : 4.5) +
+      '" fill="' + (major ? 'rgba(235,108,54,0.12)' : C.paper) + '" stroke="' +
+      (major ? C.accent : C.muted) + '" stroke-width="1.6"/>';
+  }
+
+  function tlLegend(y, horiz) {
+    return legend(y, [
+      { name: '事件', mark: function (x, yy) { return tlDot(x + 12, yy, false); } },
+      { name: '重要里程碑', mark: function (x, yy) { return tlDot(x + 12, yy, true); } },
+      { name: horiz ? '由左而右依時間排列，間距等距' : '由上而下依時間排列，間距等距',
+        mark: function () { return ''; } }
+    ]);
+  }
+
+  /* 直式：一條直線在左，事件由上而下。列高隨字數長，字多的列不會被切掉。 */
+  function tlDown(evts) {
+    var textX = TL.spineX + 22;
+    var wide = (W - 40) - textX;
+    var laid = evts.map(function (e) {
+      var tl = DD.wrapLabel(e.title, wide / TL.titleSize);
+      var nl = e.note ? DD.wrapLabel(e.note, wide / TL.noteSize) : [];
+      return {
+        e: e, tl: tl, nl: nl,
+        h: Math.max(TL.rowMin, tl.length * TL.lineH + nl.length * TL.noteH + 30)
+      };
+    });
+    var cy = TL.top + 12;
+    laid.forEach(function (r) { r.cy = cy; cy += r.h; });
+    var last = laid[laid.length - 1];
+    var H = last.cy + last.h + 74;
+
+    var out = [canvasOpen(H, '時間軸')];
+    out.push('<line x1="' + TL.spineX + '" y1="' + r1(laid[0].cy) + '" x2="' + TL.spineX +
+      '" y2="' + r1(last.cy) + '" stroke="rgba(45,49,66,0.18)" stroke-width="1.4"/>');
+
+    laid.forEach(function (r) {
+      var e = r.e;
+      out.push(tlDot(TL.spineX, r.cy, e.major));
+      if (e.label) {
+        /* 起訖日整串排出來會比單一日期長一倍，縮不下就會衝出畫布左邊 */
+        var ds = DD.shrinkToFit(TL.dateSize, DD.textUnits(e.label) * TL.dateSize,
+          TL.spineX - 22 - 40, 8);
+        out.push(text(TL.spineX - 22, r.cy + 4, e.label, {
+          fill: e.major ? C.accent : C.muted, size: ds, font: F.mono,
+          anchor: 'end', spacing: '0.06em'
+        }));
+      }
+      var ty = r.cy + 5;
+      r.tl.forEach(function (ln) {
+        out.push(text(textX, ty, ln, { fill: C.ink, size: TL.titleSize, weight: '600' }));
+        ty += TL.lineH;
+      });
+      ty += 2;
+      r.nl.forEach(function (ln) {
+        out.push(text(textX, ty, ln, { fill: C.muted, size: TL.noteSize, font: F.mono }));
+        ty += TL.noteH;
+      });
+    });
+
+    out.push(tlLegend(H - 58, false));
+    out.push('</svg>');
+    return out.join('');
+  }
+
+  /* 橫式：一條橫線是一列，事件由左而右；排滿了就換到下一列（跟關係圖同一套規矩）。
+     日期在線上方、事件與說明在線下方，字照格子寬度折行。 */
+  function tlAcross(evts, meta, warnings) {
+    var usable = W - TL.left * 2;
+    var raw = String((meta && meta.cols) || '').trim();
+    var want = parseInt(raw.replace(/[^\d]/g, ''), 10);
+    if (raw && !(want >= 1)) {
+      warnings.push('「橫式時每列幾個事件」要填一個 1 以上的數字，' +
+        '填的是「' + raw + '」，先當成自動排。');
+    }
+    var per = want >= 1 ? Math.min(want, 8)
+      : Math.max(1, Math.min(evts.length, Math.floor(usable / 150)));
+    var slotW = usable / per;
+    var inner = slotW - 18;
+
+    var lines = [], cur = [];
+    evts.forEach(function (e, i) {
+      if (i && cur.length >= per) { lines.push(cur); cur = []; }
+      cur.push({
+        e: e,
+        dl: tlDateLines(e.label, inner / TL.dateSize),
+        tl: DD.wrapLabel(e.title, inner / TL.titleSize),
+        nl: e.note ? DD.wrapLabel(e.note, inner / TL.noteSize) : []
+      });
+    });
+    if (cur.length) lines.push(cur);
+
+    var y = TL.top;
+    lines.forEach(function (row) {
+      var dn = row.reduce(function (m, c) { return Math.max(m, c.dl.length); }, 0);
+      var tn = row.reduce(function (m, c) { return Math.max(m, c.tl.length); }, 0);
+      var nn = row.reduce(function (m, c) { return Math.max(m, c.nl.length); }, 0);
+      row.dn = dn;
+      row.axisY = y + dn * TL.dateH + 10;
+      row.h = dn * TL.dateH + 10 + 24 + tn * TL.lineH + nn * TL.noteH + 30;
+      y += row.h;
+    });
+    var H = y + 46;
+
+    var out = [canvasOpen(H, '時間軸')];
+    lines.forEach(function (row, n) {
+      var cxOf = function (i) { return TL.left + slotW * i + slotW / 2; };
+      /* 換列時線要拉到紙邊、下一列再從紙邊接回來，像文字折行那樣——
+         線停在最後一個圓點上的話，看不出下一列是接續的還是另一條時間軸。 */
+      var x1 = n === 0 ? cxOf(0) : TL.left;
+      var x2 = n === lines.length - 1 ? cxOf(row.length - 1) : W - TL.left;
+      out.push('<line x1="' + r1(x1) + '" y1="' + r1(row.axisY) + '" x2="' +
+        r1(x2) + '" y2="' + r1(row.axisY) +
+        '" stroke="rgba(45,49,66,0.18)" stroke-width="1.4"/>');
+      row.forEach(function (c, i) {
+        var cx = cxOf(i), e = c.e;
+        var dy = row.axisY - 10 - (row.dn - c.dl.length) * TL.dateH - (c.dl.length - 1) * TL.dateH;
+        c.dl.forEach(function (ln) {
+          out.push(text(cx, dy, ln, {
+            fill: e.major ? C.accent : C.muted, size: TL.dateSize, font: F.mono,
+            anchor: 'middle', spacing: '0.06em'
+          }));
+          dy += TL.dateH;
+        });
+        out.push(tlDot(cx, row.axisY, e.major));
+        var ty = row.axisY + 24;
+        c.tl.forEach(function (ln) {
+          out.push(text(cx, ty, ln, {
+            fill: C.ink, size: TL.titleSize, weight: '600', anchor: 'middle'
+          }));
+          ty += TL.lineH;
+        });
+        ty += 2;
+        c.nl.forEach(function (ln) {
+          out.push(text(cx, ty, ln, {
+            fill: C.muted, size: TL.noteSize, font: F.mono, anchor: 'middle'
+          }));
+          ty += TL.noteH;
+        });
+      });
+    });
+
+    out.push(tlLegend(H - 58, true));
+    out.push('</svg>');
+    return out.join('');
+  }
 
   var timelineGen = {
     id: 'timeline',
     name: '時間軸',
-    use: '沿革、大事紀、期程說明。日期可以直接打民國年。',
+    use: '沿革、大事紀、期程說明。日期可以直接打民國年，直式橫式都做得出來。',
     sample: 'example-timeline',
     sampleTitle: '法規修正沿革',
     help: [
       '日期看得懂就照民國年排版，看不懂就原樣顯示（可以打「114 年上半年」這種）。',
-      '由上而下等距排列，不照日期間隔拉開——沿革要好讀，不是要按比例。'
+      '一段期間就打「114/2～114/6」，兩頭都看得懂的話會排成民國年的起訖。',
+      '直式是由上而下排；橫式是由左而右排，排滿一列換下一列。',
+      '由時間先後等距排列，不照日期間隔拉開——沿革要好讀，要按比例請改用甘特圖。'
     ],
     rowName: '事件',
     fields: [
@@ -422,6 +623,10 @@
       { key: 'note', label: '說明（可留空）', type: 'text', placeholder: '預告期 60 日' },
       { key: 'major', label: '重要', type: 'check', width: '76px',
         hint: '勾了圓點放大、用強調色標出來' }
+    ],
+    meta: [
+      { key: 'dir', label: '排列方向', type: 'select', options: TL_DIR_OPTIONS, width: '190px' },
+      { key: 'cols', label: '橫式時每列幾個事件，留空＝自動', type: 'text', width: '250px' }
     ],
     example: [
       { date: '114/2', title: '修正草案預告', note: '預告期 60 日' },
@@ -432,16 +637,18 @@
     ],
     build: function (rows, meta, opts) {
       var warnings = [];
+      var m = meta || {};
+      var horiz = optValue(TL_DIR_OPTIONS, m.dir) === 'right';
       var evts = [];
       (rows || []).forEach(function (row, i) {
         var title = String(row.title || '').trim();
         var raw = String(row.date || '').trim();
         if (!title && !raw) return;
         if (!title) { warnings.push('第 ' + (i + 1) + ' 列沒有填事件，跳過了。'); return; }
-        var dt = raw ? parseTwDate(raw) : null;
-        if (raw && !dt) warnings.push('「' + title + '」的日期「' + raw + '」看不懂，先用原文顯示。');
+        var d = tlDate(raw);
+        if (raw && !d.ok) warnings.push('「' + title + '」的日期「' + raw + '」看不懂，先用原文顯示。');
         evts.push({
-          label: dt ? twLabel(dt) : raw, title: title,
+          label: d.label, title: title,
           note: String(row.note || '').trim(), major: !!row.major
         });
       });
@@ -450,42 +657,8 @@
         return { svg: emptyCanvas('在左邊填日期與事件，這裡就會出現時間軸'), warnings: warnings, count: 0 };
       }
 
-      var H = TL.top + evts.length * TL.rowH + 90;
-      var out = [canvasOpen(H, '時間軸')];
-      var y0 = TL.top + 12, y1 = TL.top + (evts.length - 1) * TL.rowH + 12;
-      out.push('<line x1="' + TL.spineX + '" y1="' + r1(y0) + '" x2="' + TL.spineX + '" y2="' + r1(y1) +
-        '" stroke="rgba(45,49,66,0.18)" stroke-width="1.4"/>');
-
-      evts.forEach(function (e, i) {
-        var cy = TL.top + i * TL.rowH + 12;
-        var col = e.major ? C.accent : C.muted;
-        out.push('<circle cx="' + TL.spineX + '" cy="' + r1(cy) + '" r="' + (e.major ? 7 : 4.5) +
-          '" fill="' + (e.major ? 'rgba(235,108,54,0.12)' : C.paper) + '" stroke="' + col + '" stroke-width="1.6"/>');
-        out.push(text(TL.spineX - 22, cy + 4, e.label,
-          { fill: e.major ? C.accent : C.muted, size: 11, font: F.mono, anchor: 'end', spacing: '0.06em' }));
-        var lines = DD.wrapLabel(e.title, (700 - 40) / 14);
-        lines.slice(0, 2).forEach(function (ln, k) {
-          out.push(text(TL.spineX + 22, cy + 5 + k * 19, ln, { fill: C.ink, size: 14, weight: '600' }));
-        });
-        if (e.note) {
-          out.push(text(TL.spineX + 22, cy + 5 + Math.min(lines.length, 2) * 19 + 2, e.note,
-            { fill: C.muted, size: 10, font: F.mono }));
-        }
-      });
-
-      out.push(legend(H - 58, [
-        { name: '事件', mark: function (x, y) {
-          return '<circle cx="' + (x + 12) + '" cy="' + r1(y) + '" r="4.5" fill="' + C.paper +
-            '" stroke="' + C.muted + '" stroke-width="1.6"/>';
-        } },
-        { name: '重要里程碑', mark: function (x, y) {
-          return '<circle cx="' + (x + 12) + '" cy="' + r1(y) + '" r="7" fill="rgba(235,108,54,0.12)" stroke="' +
-            C.accent + '" stroke-width="1.6"/>';
-        } },
-        { name: '由上而下依時間排列，間距等距', mark: function () { return ''; } }
-      ]));
-      out.push('</svg>');
-      return { svg: out.join(''), warnings: warnings, count: evts.length };
+      var svg = horiz ? tlAcross(evts, m, warnings) : tlDown(evts);
+      return { svg: svg, warnings: warnings, count: evts.length };
     }
   };
 

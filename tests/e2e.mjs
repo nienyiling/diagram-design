@@ -760,6 +760,27 @@ await t('沒有東西可以復原時，復原鈕是停用的', async () => {
   await page.waitForTimeout(300);
 });
 
+await t('時間軸：切成橫式，事件就從「一列一個」變成一橫排', async () => {
+  await page.goto(server.url + '#/make/timeline', { waitUntil: 'networkidle' });
+  await page.locator('#stage svg').waitFor({ timeout: 5000 });
+  await page.locator('#makeExampleBtn').click();
+  await page.waitForTimeout(500);
+  const box = () => page.evaluate(() => {
+    const b = document.querySelector('#stage svg').viewBox.baseVal;
+    return { w: b.width, h: b.height };
+  });
+  const before = await box();
+  await page.locator('#m_timeline_dir').selectOption('right');
+  await page.waitForTimeout(600);
+  const after = await box();
+  assert.ok(after.h < before.h, '切成橫式圖卻沒有變矮：' + before.h + ' → ' + after.h);
+  const svgText = await page.evaluate(() => document.querySelector('#stage svg').textContent);
+  assert.ok(svgText.includes('三讀通過'), '切了方向字就不見了');
+  assert.ok(svgText.includes('由左而右'), '圖例沒有跟著改成橫式的說法');
+  await page.locator('#m_timeline_dir').selectOption('down');
+  await page.waitForTimeout(500);
+});
+
 await t('填的內容留在這台電腦裡，重新整理還在（純本機，不上傳）', async () => {
   await page.goto(server.url + '#/make/layers', { waitUntil: 'networkidle' });
   await page.locator('#stage svg').waitFor({ timeout: 5000 });

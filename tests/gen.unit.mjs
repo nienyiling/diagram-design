@@ -352,6 +352,69 @@ await t('時間軸：看得懂的日期照民國年排版', () => {
   assert.ok(words(out.svg).includes('114年3月'));
 });
 
+await t('時間軸：打了「日」就看得到「日」，只打到月就不要自己補一號', () => {
+  const day = timeline.build([{ date: '114/3/5', title: '甲' }], {}, {});
+  assert.ok(words(day.svg).includes('114年3月5日'), words(day.svg));
+  const month = timeline.build([{ date: '114/3', title: '甲' }], {}, {});
+  assert.ok(!words(month.svg).includes('114年3月1日'), '只打到月卻自己補了一號');
+  assert.ok(words(month.svg).includes('114年3月'));
+});
+
+await t('時間軸：一段期間打「114/2～114/6」看得懂，不要當成看不懂的字', () => {
+  const out = timeline.build([{ date: '114/2～114/6', title: '籌備期' }], {}, {});
+  assert.equal(out.warnings.length, 0, out.warnings.join('／'));
+  assert.ok(words(out.svg).includes('114年2月～114年6月'), words(out.svg));
+  /* 連字號當範圍符號，但單一日期的 114-3-5 不可以被拆壞 */
+  const dash = timeline.build([{ date: '114/3/1-114/6/30', title: '乙' }], {}, {});
+  assert.ok(words(dash.svg).includes('114年3月1日～114年6月30日'), words(dash.svg));
+  const single = timeline.build([{ date: '114-3-5', title: '丙' }], {}, {});
+  assert.equal(single.warnings.length, 0);
+  assert.ok(words(single.svg).includes('114年3月5日'), words(single.svg));
+});
+
+await t('時間軸：字多的那一列自己長高，第三行以後不會被吃掉', () => {
+  const short = timeline.build([{ date: '114/2', title: '甲' }], {}, {});
+  const long = timeline.build([{ date: '114/2', title: '很長的事件名稱'.repeat(12) }], {}, {});
+  const h = (svg) => +/viewBox="0 0 \d+ (\d+)"/.exec(svg)[1];
+  assert.ok(h(long.svg) > h(short.svg), '字多了圖卻沒有長高：' + h(long.svg));
+  assert.ok((long.svg.match(/<text/g) || []).length >= 4, '長事件名稱沒有折成多行');
+  /* 折出來的每一段合起來要是原文，一個字都不能掉 */
+  assert.equal(words(long.svg).replace(/\s/g, '').includes('很長的事件名稱'.repeat(12)), true);
+});
+
+await t('時間軸：橫式由左而右排，直式由上而下排', () => {
+  const rows = [{ date: '114/1', title: '甲' }, { date: '114/2', title: '乙' }];
+  const pos = (svg, name) => {
+    const m = new RegExp('<text x="([\\d.]+)" y="([\\d.]+)"[^>]*>' + name + '<').exec(svg);
+    return { x: +m[1], y: +m[2] };
+  };
+  const down = timeline.build(rows, { dir: 'down' }, {}).svg;
+  assert.equal(pos(down, '甲').x, pos(down, '乙').x, '直式沒有對齊在同一直線上');
+  assert.ok(pos(down, '乙').y > pos(down, '甲').y, '直式沒有往下排');
+
+  const right = timeline.build(rows, { dir: 'right' }, {}).svg;
+  assert.equal(pos(right, '甲').y, pos(right, '乙').y, '橫式沒有排在同一橫排');
+  assert.ok(pos(right, '乙').x > pos(right, '甲').x, '橫式沒有往右排');
+  const h = (svg) => +/viewBox="0 0 \d+ (\d+)"/.exec(svg)[1];
+  assert.ok(h(right) < h(down), '橫式沒有比直式矮');
+});
+
+await t('時間軸：橫式排滿一列就換到下一列', () => {
+  const rows = [1, 2, 3, 4, 5].map((n) => ({ date: '114/' + n, title: '第' + n + '件' }));
+  const y = (svg, name) => +new RegExp('<text x="[\\d.]+" y="([\\d.]+)"[^>]*>' + name + '<')
+    .exec(svg)[1];
+  const two = timeline.build(rows, { dir: 'right', cols: '2' }, {}).svg;
+  assert.equal(y(two, '第1件'), y(two, '第2件'), '說了一列兩個卻沒排在同一列');
+  assert.ok(y(two, '第3件') > y(two, '第1件'), '一列兩個時第三件沒有換列');
+});
+
+await t('時間軸：每列幾個亂填時講一聲，不要整張圖不見', () => {
+  const out = timeline.build([{ date: '114/1', title: '甲' }], { dir: 'right', cols: '很多' }, {});
+  assert.equal(out.count, 1);
+  assert.match(out.warnings[0], /每列幾個事件/);
+  assert.ok(words(out.svg).includes('甲'));
+});
+
 /* ── 分層堆疊圖 ────────────────────────────────────────────────────── */
 
 const layers = G.byId('layers');
