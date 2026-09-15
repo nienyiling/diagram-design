@@ -405,7 +405,8 @@
 
   var TL_DIR_OPTIONS = [
     { value: 'down', label: '直式（由上而下）' },
-    { value: 'right', label: '橫式（由左而右）' }
+    { value: 'right', label: '橫式（由左而右）' },
+    { value: 'zigzag', label: '橫式（上下交錯）' }
   ];
 
   var TL = {
@@ -463,13 +464,48 @@
       (major ? C.accent : C.muted) + '" stroke-width="1.6"/>';
   }
 
-  function tlLegend(y, horiz) {
+  /* 交錯那句話一定要寫出來：上下分兩排看起來很像在分兩類（計畫／實際、本機關／他機關），
+     其實只是為了排得下。不講的話讀圖的人會自己腦補一個不存在的意思。 */
+  var TL_ORDER_NOTE = {
+    down: '由上而下依時間排列，間距等距',
+    right: '由左而右依時間排列，間距等距',
+    zigzag: '由左而右依時間排列，上下交錯只是為了排得下，沒有別的意思'
+  };
+
+  function tlLegend(y, dir) {
     return legend(y, [
       { name: '事件', mark: function (x, yy) { return tlDot(x + 12, yy, false); } },
       { name: '重要里程碑', mark: function (x, yy) { return tlDot(x + 12, yy, true); } },
-      { name: horiz ? '由左而右依時間排列，間距等距' : '由上而下依時間排列，間距等距',
-        mark: function () { return ''; } }
+      { name: TL_ORDER_NOTE[dir] || TL_ORDER_NOTE.down, mark: function () { return ''; } }
     ]);
+  }
+
+  /* 一列排幾個：使用者說了算，沒說就照「一格至少多寬」回推。
+     交錯時上下兩排錯開，一格佔的字寬是兩格，所以格子可以窄一半。 */
+  function tlPer(meta, warnings, count, usable, minSlot) {
+    var raw = String((meta && meta.cols) || '').trim();
+    var want = parseInt(raw.replace(/[^\d]/g, ''), 10);
+    if (raw && !(want >= 1)) {
+      warnings.push('「橫式時每列幾個事件」要填一個 1 以上的數字，' +
+        '填的是「' + raw + '」，先當成自動排。');
+    }
+    if (want >= 1) return Math.min(want, 10);
+    return Math.max(1, Math.min(count, Math.floor(usable / minSlot)));
+  }
+
+  /* 交錯版的一格：日期貼著主軸，事件與說明往外長。
+     不管在線的上面還是下面，日期都貼著線——這樣兩排的日期都在主軸旁邊，
+     眼睛沿著線掃過去就讀得到時間。 */
+  function tlBlock(c) {
+    var out = [];
+    c.dl.forEach(function (ln) { out.push({ s: ln, h: TL.dateH, date: true }); });
+    c.tl.forEach(function (ln) { out.push({ s: ln, h: TL.lineH, title: true }); });
+    c.nl.forEach(function (ln, i) { out.push({ s: ln, h: TL.noteH + (i ? 0 : 2) }); });
+    return out;
+  }
+
+  function tlBlockH(block) {
+    return block.reduce(function (m, ln) { return m + ln.h; }, 0);
   }
 
   /* 直式：一條直線在左，事件由上而下。列高隨字數長，字多的列不會被切掉。 */
@@ -517,7 +553,7 @@
       });
     });
 
-    out.push(tlLegend(H - 58, false));
+    out.push(tlLegend(H - 58, 'down'));
     out.push('</svg>');
     return out.join('');
   }
@@ -526,14 +562,7 @@
      日期在線上方、事件與說明在線下方，字照格子寬度折行。 */
   function tlAcross(evts, meta, warnings) {
     var usable = W - TL.left * 2;
-    var raw = String((meta && meta.cols) || '').trim();
-    var want = parseInt(raw.replace(/[^\d]/g, ''), 10);
-    if (raw && !(want >= 1)) {
-      warnings.push('「橫式時每列幾個事件」要填一個 1 以上的數字，' +
-        '填的是「' + raw + '」，先當成自動排。');
-    }
-    var per = want >= 1 ? Math.min(want, 8)
-      : Math.max(1, Math.min(evts.length, Math.floor(usable / 150)));
+    var per = tlPer(meta, warnings, evts.length, usable, 150);
     var slotW = usable / per;
     var inner = slotW - 18;
 
@@ -599,7 +628,89 @@
       });
     });
 
-    out.push(tlLegend(H - 58, true));
+    out.push(tlLegend(H - 58, 'right'));
+    out.push('</svg>');
+    return out.join('');
+  }
+
+  /* 交錯：一條主軸，點輪流往上、往下拉開。
+     好處是一格的字可以佔到兩格寬（左右鄰居在線的另一邊），同樣一條線塞得下的
+     事件多一倍；代價是上下兩排看起來像兩類，所以圖例要講明白沒有那個意思。 */
+  var TL_LEAD = 16;
+
+  function tlZig(evts, meta, warnings) {
+    var usable = W - TL.left * 2;
+    var per = tlPer(meta, warnings, evts.length, usable, 100);
+    var slotW = usable / per;
+    /* 相鄰的兩格在線的不同邊，所以字排得到兩格寬；邊上的那一格只剩一格半，
+       取 1.8 格是兩者之間的折衷，排到紙邊外面比擠在一起更難救。 */
+    var inner = Math.max(slotW - 18, slotW * 1.8 - 24);
+
+    var lines = [], cur = [];
+    evts.forEach(function (e, i) {
+      if (i && cur.length >= per) { lines.push(cur); cur = []; }
+      var c = {
+        e: e,
+        dl: tlDateLines(e.label, inner / TL.dateSize),
+        tl: DD.wrapLabel(e.title, inner / TL.titleSize),
+        nl: e.note ? DD.wrapLabel(e.note, inner / TL.noteSize) : []
+      };
+      /* 第幾個決定在線的上面還是下面：偶數在下、奇數在上。
+         每一列都重新從「下」開始，不然列數一多就看不出規律。 */
+      c.up = cur.length % 2 === 1;
+      c.block = tlBlock(c);
+      cur.push(c);
+    });
+    if (cur.length) lines.push(cur);
+
+    var y = TL.top;
+    lines.forEach(function (row) {
+      var up = 0, down = 0;
+      row.forEach(function (c) {
+        var h = tlBlockH(c.block);
+        if (c.up) up = Math.max(up, h); else down = Math.max(down, h);
+      });
+      row.up = up;
+      row.axisY = y + up + TL_LEAD;
+      row.h = up + TL_LEAD * 2 + down + 30;
+      y += row.h;
+    });
+    var H = y + 46;
+
+    var out = [canvasOpen(H, '時間軸')];
+    lines.forEach(function (row, n) {
+      var cxOf = function (i) { return TL.left + slotW * i + slotW / 2; };
+      var x1 = n === 0 ? cxOf(0) : TL.left;
+      var x2 = n === lines.length - 1 ? cxOf(row.length - 1) : W - TL.left;
+      out.push('<line x1="' + r1(x1) + '" y1="' + r1(row.axisY) + '" x2="' +
+        r1(x2) + '" y2="' + r1(row.axisY) +
+        '" stroke="rgba(45,49,66,0.18)" stroke-width="1.4"/>');
+      row.forEach(function (c, i) {
+        var cx = cxOf(i), e = c.e;
+        var h = tlBlockH(c.block);
+        /* 上排的字往上頂齊，日期才會跟同一排的其他格對在同一條水平線上；
+           字少的那一格離主軸遠一點沒關係，引線會把它接回去。 */
+        var top = c.up ? row.axisY - TL_LEAD - row.up : row.axisY + TL_LEAD;
+        /* 引線：從圓點拉到那一格的字，不然上下兩排對不出哪個字是哪個點的 */
+        out.push('<line x1="' + r1(cx) + '" y1="' + r1(row.axisY + (c.up ? -6 : 6)) +
+          '" x2="' + r1(cx) + '" y2="' + r1(c.up ? top + h : top) +
+          '" stroke="' + (e.major ? C.accent : 'rgba(45,49,66,0.28)') + '" stroke-width="1"/>');
+        out.push(tlDot(cx, row.axisY, e.major));
+        var ty = top;
+        c.block.forEach(function (ln) {
+          ty += ln.h;
+          out.push(text(cx, ty - 3, ln.s, {
+            fill: ln.title ? C.ink : (ln.date && e.major ? C.accent : C.muted),
+            size: ln.title ? TL.titleSize : (ln.date ? TL.dateSize : TL.noteSize),
+            font: ln.title ? F.sans : F.mono,
+            weight: ln.title ? '600' : null,
+            anchor: 'middle', spacing: ln.date ? '0.06em' : null
+          }));
+        });
+      });
+    });
+
+    out.push(tlLegend(H - 58, 'zigzag'));
     out.push('</svg>');
     return out.join('');
   }
@@ -614,6 +725,8 @@
       '日期看得懂就照民國年排版，看不懂就原樣顯示（可以打「114 年上半年」這種）。',
       '一段期間就打「114/2～114/6」，兩頭都看得懂的話會排成民國年的起訖。',
       '直式是由上而下排；橫式是由左而右排，排滿一列換下一列。',
+      '事件多又想排成一條線，就選「橫式（上下交錯）」：點會輪流往上下拉開，' +
+        '一條線塞得下的事件多一倍，上下沒有別的意思。',
       '由時間先後等距排列，不照日期間隔拉開——沿革要好讀，要按比例請改用甘特圖。'
     ],
     rowName: '事件',
@@ -638,7 +751,7 @@
     build: function (rows, meta, opts) {
       var warnings = [];
       var m = meta || {};
-      var horiz = optValue(TL_DIR_OPTIONS, m.dir) === 'right';
+      var dir = optValue(TL_DIR_OPTIONS, m.dir);
       var evts = [];
       (rows || []).forEach(function (row, i) {
         var title = String(row.title || '').trim();
@@ -657,7 +770,9 @@
         return { svg: emptyCanvas('在左邊填日期與事件，這裡就會出現時間軸'), warnings: warnings, count: 0 };
       }
 
-      var svg = horiz ? tlAcross(evts, m, warnings) : tlDown(evts);
+      var svg = dir === 'right' ? tlAcross(evts, m, warnings)
+        : dir === 'zigzag' ? tlZig(evts, m, warnings)
+          : tlDown(evts);
       return { svg: svg, warnings: warnings, count: evts.length };
     }
   };

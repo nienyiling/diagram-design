@@ -408,11 +408,44 @@ await t('時間軸：橫式排滿一列就換到下一列', () => {
   assert.ok(y(two, '第3件') > y(two, '第1件'), '一列兩個時第三件沒有換列');
 });
 
+await t('時間軸：上下交錯時，相鄰的兩個事件一個在線上、一個在線下', () => {
+  const rows = [1, 2, 3, 4].map((n) => ({ date: '114/' + n, title: '第' + n + '件' }));
+  const svg = timeline.build(rows, { dir: 'zigzag' }, {}).svg;
+  const y = (name) => +new RegExp('<text x="[\\d.]+" y="([\\d.]+)"[^>]*>' + name + '<')
+    .exec(svg)[1];
+  const axis = +/<line x1="[\d.]+" y1="([\d.]+)"/.exec(svg)[1];
+  assert.ok(y('第1件') > axis, '第一件沒有畫在主軸下面');
+  assert.ok(y('第2件') < axis, '第二件沒有交錯到主軸上面');
+  assert.ok(y('第3件') > axis && y('第4件') < axis, '第三、四件沒有繼續交錯');
+  /* 同一邊的兩件要對齊，日期才不會一個高一個低 */
+  assert.equal(y('第1件'), y('第3件'), '線下的兩件沒有對齊');
+  assert.equal(y('第2件'), y('第4件'), '線上的兩件沒有對齊');
+});
+
+await t('時間軸：上下交錯是為了一條線塞得下更多事件，所以同樣的事件排得比較少列', () => {
+  const rows = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ date: '114/' + n, title: '第' + n + '件' }));
+  const axes = (svg) => (svg.match(/<line x1="[\d.]+" y1="([\d.]+)" x2="[\d.]+" y2="\1"/g) || []).length;
+  const flat = timeline.build(rows, { dir: 'right' }, {}).svg;
+  const zig = timeline.build(rows, { dir: 'zigzag' }, {}).svg;
+  assert.ok(axes(zig) < axes(flat), '交錯沒有比較省列：' + axes(zig) + ' vs ' + axes(flat));
+  /* 八件都還在，一件都不能因為擠不下就消失 */
+  rows.forEach((r) => assert.ok(words(zig).includes(r.title), r.title + ' 不見了'));
+});
+
+await t('時間軸：交錯的上下不代表分類，圖例要講出來', () => {
+  const zig = timeline.build([{ date: '114/1', title: '甲' }], { dir: 'zigzag' }, {}).svg;
+  assert.ok(words(zig).includes('沒有別的意思'), words(zig));
+  const flat = timeline.build([{ date: '114/1', title: '甲' }], { dir: 'right' }, {}).svg;
+  assert.ok(!words(flat).includes('沒有別的意思'));
+});
+
 await t('時間軸：每列幾個亂填時講一聲，不要整張圖不見', () => {
-  const out = timeline.build([{ date: '114/1', title: '甲' }], { dir: 'right', cols: '很多' }, {});
-  assert.equal(out.count, 1);
-  assert.match(out.warnings[0], /每列幾個事件/);
-  assert.ok(words(out.svg).includes('甲'));
+  ['right', 'zigzag'].forEach((dir) => {
+    const out = timeline.build([{ date: '114/1', title: '甲' }], { dir: dir, cols: '很多' }, {});
+    assert.equal(out.count, 1);
+    assert.match(out.warnings[0], /每列幾個事件/);
+    assert.ok(words(out.svg).includes('甲'));
+  });
 });
 
 /* ── 分層堆疊圖 ────────────────────────────────────────────────────── */
