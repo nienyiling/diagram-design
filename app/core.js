@@ -36,7 +36,7 @@
   var UPSTREAM_LIGHT = { paper: '#f5f5f5', ink: '#2d3142', muted: '#4f5d75', accent: '#eb6c36' };
   var UPSTREAM_DARK = { paper: '#2d3142', ink: '#f5f5f5', muted: '#bfc0c0', accent: '#f08a59' };
 
-  /* 換色預設組。gongwu 這組跟公務用工具箱同一套（暖紙底、印章紅）。 */
+  /* 換色預設組。gongwu 這組跟好好用工具箱同一套（暖紙底、印章紅）。 */
   var PALETTES = [
     { id: 'source', name: '原版（維持範本原色）', light: null, dark: null },
     {
@@ -1485,7 +1485,7 @@
       '<title>' + name + '</title>\n' +
       (o.credit === false ? '<!-- 本檔零外部請求，可離線開啟。 -->\n'
         : '<!-- 圖表範本來源：' + SOURCE.url + '（' + SOURCE.license + ' License, ' + SOURCE.author + '）\n' +
-          '     由「公務用圖表範本庫」改字產出。本檔零外部請求，可離線開啟。 -->\n') +
+          '     由「圖表範本庫」改字產出。本檔零外部請求，可離線開啟。 -->\n') +
       '<style>\n' +
       '  html,body{margin:0;padding:0;background:' + colors.paper + ';color:' + colors.ink + ';}\n' +
       '  body{font-family:' + FONTS.sans.replace(/'/g, '"') + ';padding:24px;}\n' +

@@ -624,7 +624,7 @@
       el.pngNote.textContent = '這張範本用到了 SVG 的 foreignObject，瀏覽器不會把它畫進 PNG 裡，' +
         '所以 PNG 這條路對它是壞的。請改用 SVG（Word 可以直接插入）或 HTML（用瀏覽器列印成 PDF）。';
     }
-    document.title = (diagram.heading || diagram.typeZh) + ' — 公務用圖表範本庫';
+    document.title = (diagram.heading || diagram.typeZh) + ' — 圖表範本庫';
   }
 
   function bind() {

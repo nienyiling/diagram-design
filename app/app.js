@@ -270,7 +270,7 @@
       gallery.hidden = true;
       editor.hidden = false;
       window.scrollTo(0, 0);
-      document.title = '流程圖畫板 — 公務用圖表工具';
+      document.title = '流程圖畫板 — 圖表工具';
       window.DDForms.close();
       window.DDCanvas.open();
       return;
@@ -283,7 +283,7 @@
       gallery.hidden = true;
       editor.hidden = false;
       window.scrollTo(0, 0);
-      document.title = GEN.byId(make[1]).name + '產生器 — 公務用圖表工具';
+      document.title = GEN.byId(make[1]).name + '產生器 — 圖表工具';
       window.DDForms.open(make[1]);
       return;
     }
@@ -302,7 +302,7 @@
 
     editor.hidden = true;
     gallery.hidden = false;
-    document.title = '公務用圖表工具';
+    document.title = '圖表工具';
     /* 網址指名一張範本，但資料還沒到：等 load() 完成會再跑一次 route() */
     if (id && !data) return;
     if (id) {

@@ -40,8 +40,8 @@ await page.goto(server.url, { waitUntil: 'networkidle' });
 /* ── 首頁 ────────────────────────────────────────────────────────── */
 
 await t('首頁打得開，標題是中文的', async () => {
-  assert.equal(await page.title(), '公務用圖表工具');
-  assert.equal(await page.locator('h1').first().innerText(), '公務用圖表工具');
+  assert.equal(await page.title(), '圖表工具');
+  assert.equal(await page.locator('h1').first().innerText(), '圖表工具');
 });
 
 await t('頂欄有回工具箱的路', async () => {
