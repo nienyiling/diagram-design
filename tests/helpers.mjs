@@ -21,17 +21,34 @@ const MIME = {
   '.png': 'image/png'
 };
 
-/** 起一個只讀 repo 目錄的靜態伺服器，回傳 {url, close}。埠號交給系統挑。 */
+/** _headers 的規則（路徑行＋縮排的「名稱: 值」，路徑支援結尾 /*），回傳 path → 標頭物件。 */
+function headerRules(dir) {
+  const f = fs.existsSync(path.join(dir, '_headers')) ? path.join(dir, '_headers') : path.join(ROOT, '_headers');
+  const rules = [];
+  for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
+    if (!line.trim() || line.trim().startsWith('#')) continue;
+    if (!/^\s/.test(line)) { rules.push({ path: line.trim(), h: {} }); continue; }
+    const i = line.indexOf(':'); rules.at(-1).h[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return (p) => Object.assign({}, ...rules
+    .filter((r) => (r.path.endsWith('/*') ? p.startsWith(r.path.slice(0, -1)) : p === r.path)).map((r) => r.h));
+}
+
+/** 起一個只讀 repo 目錄的靜態伺服器，回傳 {url, close}。埠號交給系統挑。
+ *  照 _headers 送標頭（含 CSP），跟線上一致：CSP 擋到東西會在 console 報錯，e2e 就會紅。 */
 export function serve(dir = ROOT) {
+  const headersFor = headerRules(dir);
   const server = http.createServer((req, res) => {
-    const rel = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html';
+    const pathname = decodeURIComponent(req.url.split('?')[0]);
+    const rel = pathname.replace(/^\/+/, '') || 'index.html';
     const file = path.join(dir, rel);
     if (!file.startsWith(dir)) { res.writeHead(403).end('forbidden'); return; }
     fs.readFile(file, (err, buf) => {
       if (err) { res.writeHead(404).end('not found'); return; }
       res.writeHead(200, {
         'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
-        'Content-Length': buf.length
+        'Content-Length': buf.length,
+        ...headersFor(pathname)
       });
       res.end(buf);
     });

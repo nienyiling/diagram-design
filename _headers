@@ -10,7 +10,13 @@
   Cache-Control: public, max-age=0, must-revalidate
 
 # 這個站不需要被任何人嵌進 iframe，也不該被猜 MIME
+# CSP（2026-10）：程式全是 app/ 底下的獨立檔案，script-src 只准本站、不准內嵌程式——
+# 就算匯入的圖檔或範本夾帶了程式碼也跑不起來。樣式要 'unsafe-inline'（範本 SVG 自帶 style）；
+# 下載 PNG 時把 SVG 轉成 data:／blob: 圖片畫上畫布，img-src 放行這兩種本機網址。
+# tests/helpers.mjs 的伺服器照本檔送標頭，CSP 擋到東西會在 console 報錯，e2e 就會紅。
 /*
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), interest-cohort=()
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'

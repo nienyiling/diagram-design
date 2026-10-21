@@ -544,6 +544,7 @@ groups: [
   **新增 `app/*.js` 時要同步加進 `REQUIRED`**，不然首頁看起來完全正常，
   使用者一點做圖入口才發現整支壞掉。
 - Pages 專案的 production branch 寫死 `main`，不要用 `default_branch`。
+- `_headers` 有 CSP（2026-10）：`script-src 'self'`，**不准內嵌程式**（新程式一律寫成 `app/` 底下的檔案）；圖片只准本站與 `data:`／`blob:`（下載 PNG、複製圖片要用）。`tests/helpers.mjs` 的伺服器照 `_headers` 送標頭，CSP 擋到東西 e2e 會紅。**要加外部資源或連線，先改 CSP。**
 - 網址一律從 Actions 的部署摘要讀，不要猜——Pages 子網域撞名會自動加後綴。
 - 驗收不能只看首頁：要進一支產生器改一格字、加一列、下載一次 PNG 與一次 Word 檔
   （**Word 檔要真的用 Word 開一次**：確認整張圖是一個群組、右鍵可以「取消群組」、
